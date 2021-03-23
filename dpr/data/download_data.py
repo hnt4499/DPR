@@ -498,16 +498,19 @@ def main():
     )
     parser.add_argument(
         "--resource",
+        action="store",
+        nargs="*",
         type=str,
         help="Resource name. See RESOURCES_MAP for all possible values",
     )
     args = parser.parse_args()
-    if args.resource:
-        download(args.resource, args.output_dir)
+    if args.resource is not None and len(args.resource) > 0:
+        for resource in args.resource:
+            download(resource, args.output_dir)
     else:
         print("Please specify resource value. Possible options are:")
         for k, v in RESOURCES_MAP.items():
-            print("Resource key=%s  :  %s", k, v["desc"])
+            print("Resource key={}  :  {}".format(k, v["desc"]))
 
 
 if __name__ == "__main__":
