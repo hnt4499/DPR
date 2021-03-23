@@ -3,3 +3,7 @@ dpr/data/downloads/
 
 # Workspace
 workspace.code-workspace
+
+# Jupyter
+*.ipynb
+.ipynb_checkpoints/
