@@ -1,9 +1,15 @@
 # Data
-dpr/data/downloads/
+downloads/
+outputs/
+work_dirs/
+
+# Compile
+*.pyc
 
 # Workspace
 workspace.code-workspace
 
 # Jupyter
+notebooks
 *.ipynb
 .ipynb_checkpoints/
