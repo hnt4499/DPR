@@ -16,6 +16,7 @@ import os
 import random
 import sys
 import time
+import yaml
 from typing import Tuple
 
 import hydra
@@ -63,6 +64,11 @@ class BiEncoderTrainer(object):
     """
 
     def __init__(self, cfg: DictConfig):
+        # Save config
+        if cfg.local_rank in [-1, 0]:
+            with open("config.yaml", "w") as fout:
+                yaml.dump(eval(str(cfg)), fout)
+
         self.shard_id = cfg.local_rank if cfg.local_rank != -1 else 0
         self.distributed_factor = cfg.distributed_world_size or 1
 
