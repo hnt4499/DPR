@@ -7,7 +7,8 @@
 
 """
 Encoder model wrappers based on HuggingFace code using only one model for
-encoding both question and context
+encoding both question and context, with several layers on top of the encoder
+; second stage: feed-forward, interactive matching)
 """
 
 import logging
@@ -20,7 +21,7 @@ from transformers.modeling_bert import BertConfig, BertModel
 from transformers.optimization import AdamW
 from transformers.tokenization_bert import BertTokenizer
 
-from dpr.models.biencoder import BiEncoder
+from dpr.models.biencoder import Match_BiEncoder
 from dpr.utils.data_utils import Tensorizer
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ def get_bert_biencoder_components(cfg, inference_only: bool = False, **kwargs):
 
     fix_ctx_encoder = cfg.fix_ctx_encoder if hasattr(cfg, "fix_ctx_encoder") else False
 
-    biencoder = BiEncoder(
+    biencoder = Match_BiEncoder(
         question_encoder, ctx_encoder, fix_ctx_encoder=fix_ctx_encoder
     )
 
@@ -123,7 +124,7 @@ def get_optimizer(
     return optimizer
 
 
-def get_bert_tokenizer(pretrained_cfg_name: str, biencoder: BiEncoder, do_lower_case: bool = True):
+def get_bert_tokenizer(pretrained_cfg_name: str, biencoder: Match_BiEncoder, do_lower_case: bool = True):
     """If needed, this tokenizer will be added one special token [QST] representing the question token"""
     tokenizer = BertTokenizer.from_pretrained(
         pretrained_cfg_name, do_lower_case=do_lower_case
@@ -151,6 +152,7 @@ class HFBertEncoder(BertModel):
             nn.Linear(config.hidden_size, project_dim) if project_dim != 0 else None
         )
         self.init_weights()
+        self.out_features = project_dim if project_dim != 0 else config.hidden_size
 
     @classmethod
     def init_encoder(

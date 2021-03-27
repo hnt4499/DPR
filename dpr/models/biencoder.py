@@ -362,6 +362,12 @@ class BiEncoder(nn.Module):
 
 
 class BiEncoderNllLoss(object):
+    def __init__(
+        self,
+        cfg
+    ):
+        self.cfg = cfg
+
     def calc(
         self,
         q_vectors: T,
@@ -382,12 +388,25 @@ class BiEncoderNllLoss(object):
             q_num = q_vectors.size(0)
             scores = scores.view(q_num, -1)
 
-        softmax_scores = F.log_softmax(scores, dim=1)
+        return self.calc_given_score_matrix(scores, positive_idx_per_question, loss_scale=loss_scale)
+
+    @staticmethod
+    def calc_given_score_matrix(
+        score_mat: T,
+        positive_idx_per_question: list,
+        loss_scale: float = None,
+        reduction: str = "mean"
+    ) -> Tuple[T, int]:
+        """
+        General utility to calculate NLL loss given the un-normalized score matrix of shape (n1, n2), where n1 is
+        the number of questions and n2 is the number of passages.
+        """
+        softmax_scores = F.log_softmax(score_mat, dim=1)
 
         loss = F.nll_loss(
             softmax_scores,
             torch.tensor(positive_idx_per_question).to(softmax_scores.device),
-            reduction="mean",
+            reduction=reduction,
         )
 
         max_score, max_idxs = torch.max(softmax_scores, 1)
@@ -408,6 +427,90 @@ class BiEncoderNllLoss(object):
     @staticmethod
     def get_similarity_function():
         return dot_product_scores
+
+
+class Match_BiEncoder(BiEncoder):
+    def __init__(
+        self,
+        question_model: nn.Module,
+        ctx_model: nn.Module,
+        fix_q_encoder: bool = False,
+        fix_ctx_encoder: bool = False,
+    ):
+        super(Match_BiEncoder, self).__init__(
+            question_model, ctx_model, fix_q_encoder=fix_q_encoder, fix_ctx_encoder=fix_ctx_encoder
+        )
+        self.linear = nn.Linear(in_features=question_model.out_features * 4, out_features=1)  # linear projection
+
+    def forward(self, *args, **kwargs) -> Tuple[T, T, T]:
+        """Return an **interaction** matrix on top of the embeddings."""
+        q_pooled_out, ctx_pooled_out = super(Match_BiEncoder, self).forward(*args, **kwargs)  # (n1, d) and (n2, d)
+
+        # Shape
+        q_pooled_out_r = q_pooled_out.unsqueeze(-1).repeat(1, 1, ctx_pooled_out.shape[0])  # (n1, d, n2)
+        ctx_pooled_out_r = ctx_pooled_out.transpose(0, 1).unsqueeze(0).repeat(q_pooled_out.shape[0], 1, 1)  # (n1, d, n2)
+
+        # Interact
+        interaction_mul = q_pooled_out_r * ctx_pooled_out_r  # (n1, d, n2)
+        interaction_diff = q_pooled_out_r - ctx_pooled_out_r  # (n1, d, n2)
+        interaction_mat = torch.cat(
+            [q_pooled_out_r, ctx_pooled_out_r, interaction_mul, interaction_diff], dim=1)  # (n1, 4d, n2)
+        interaction_mat = interaction_mat.transpose(1, 2).contiguous()  # (n1, n2, 4d)
+
+        # Linear projection
+        interaction_mat = self.linear(interaction_mat).squeeze(-1)  # (n1, n2)
+        return q_pooled_out, ctx_pooled_out, interaction_mat
+
+
+class Match_BiEncoderNllLoss(BiEncoderNllLoss):
+    def calc(
+        self,
+        q_vectors: T,
+        ctx_vectors: T,
+        interaction_mats: List[T],
+        positive_idx_per_question: list,
+        positive_idx_per_question_per_gpu: list,
+        hard_negative_idx_per_question: list,
+        hard_negative_idx_per_question_per_gpu: list,
+        loss_scale: Tuple[float, float]
+    ) -> Tuple[T, int]:
+        """Calculate loss for both metric learning and interaction layer."""
+
+        if loss_scale is not None:
+            assert len(loss_scale) == 2
+        else:
+            loss_scale = (None, None)
+
+        # Calculate metric learning loss
+        ml_loss, ml_correct_predictions_count = super(Match_BiEncoderNllLoss, self).calc(
+            q_vectors,
+            ctx_vectors,
+            positive_idx_per_question,
+            hard_negative_idx_per_question=hard_negative_idx_per_question,
+            loss_scale=loss_scale[0]
+        )  # "ml" stands for "metric learning"
+
+        # Calculate interaction loss; we have to compute this locally (i.e., in each GPU)
+        # TODO: make it globally
+        assert len(interaction_mats) == len(positive_idx_per_question_per_gpu) == len(hard_negative_idx_per_question_per_gpu)
+        intr_loss = []
+        intr_correct_predictions_count = 0
+
+        for interaction_mat, positive_idx_per_question_per_gpu_i in \
+                zip(interaction_mats, positive_idx_per_question_per_gpu):
+            intr_l, intr_correct_predictions_c = self.calc_given_score_matrix(
+                interaction_mat,
+                positive_idx_per_question_per_gpu_i,
+                loss_scale=loss_scale[1],
+                reduction="none")
+            intr_loss.append(intr_l)
+            intr_correct_predictions_count += intr_correct_predictions_c
+        intr_loss = torch.cat(intr_loss).mean()  # reduction
+
+        # Total loss
+        total_loss = ml_loss + intr_loss
+
+        return total_loss, intr_correct_predictions_count
 
 
 def _select_span_with_token(

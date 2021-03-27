@@ -25,8 +25,8 @@ from omegaconf import DictConfig, OmegaConf
 from torch import Tensor as T
 from torch import nn
 
-from dpr.models import init_biencoder_components
-from dpr.models.biencoder import BiEncoder, BiEncoderNllLoss, BiEncoderBatch
+from dpr.models import init_biencoder_components, init_loss
+from dpr.models.biencoder import BiEncoder, BiEncoderBatch
 from dpr.options import (
     setup_cfg_gpu,
     set_seed,
@@ -104,6 +104,7 @@ class BiEncoderTrainer(object):
         self.best_cp_name = None
         self.cfg = cfg
         self.ds_cfg = BiencoderDatasetsCfg(cfg)
+        self.loss_function = init_loss(cfg.encoder.encoder_model_type, cfg)
 
         if saved_state:
             self._load_saved_state(saved_state)
@@ -285,6 +286,7 @@ class BiEncoderTrainer(object):
                 self.biencoder,
                 biencoder_input,
                 self.tensorizer,
+                self.loss_function,
                 cfg,
                 encoder_type=encoder_type,
                 rep_positions=rep_positions,
@@ -335,7 +337,7 @@ class BiEncoderTrainer(object):
         data_iterator = self.dev_iterator
 
         sub_batch_size = cfg.train.val_av_rank_bsz
-        sim_score_f = BiEncoderNllLoss.get_similarity_function()
+        sim_score_f = self.loss_function.get_similarity_function()
         q_represenations = []
         ctx_represenations = []
         positive_idx_per_question = []
@@ -530,6 +532,7 @@ class BiEncoderTrainer(object):
                 self.biencoder,
                 biencoder_batch,
                 self.tensorizer,
+                self.loss_function,
                 cfg,
                 encoder_type=encoder_type,
                 rep_positions=rep_positions,
@@ -730,10 +733,110 @@ def _calc_loss(
     return loss, is_correct
 
 
+def _calc_loss_matching(
+    cfg,
+    loss_function,
+    local_q_vector,
+    local_ctx_vectors,
+    local_interaction_mat,
+    local_positive_idxs,
+    local_hard_negatives_idxs: list = None,
+    loss_scale: float = None,
+) -> Tuple[T, bool]:
+    """
+    Calculates In-batch negatives schema loss and supports to run it in DDP mode by exchanging the representations
+    across all the nodes.
+    """
+    distributed_world_size = cfg.distributed_world_size or 1
+    if distributed_world_size > 1:
+        q_vector_to_send = (
+            torch.empty_like(local_q_vector).cpu().copy_(local_q_vector).detach_()
+        )
+        ctx_vector_to_send = (
+            torch.empty_like(local_ctx_vectors).cpu().copy_(local_ctx_vectors).detach_()
+        )
+        interaction_mat_to_send = (
+            torch.empty_like(local_interaction_mat).cpu().copy_(local_interaction_mat).detach_()
+        )
+
+        global_question_ctx_vectors = all_gather_list(
+            [
+                q_vector_to_send,
+                ctx_vector_to_send,
+                interaction_mat_to_send,
+                local_positive_idxs,
+                local_hard_negatives_idxs,
+            ],
+            max_size=cfg.global_loss_buf_sz,
+        )
+
+        global_q_vector = []
+        global_ctxs_vector = []
+        global_interaction_mats = []
+
+        # ctxs_per_question = local_ctx_vectors.size(0)
+        positive_idx_per_question = []
+        positive_idx_per_question_per_gpu = []
+        hard_negatives_per_question = []
+        hard_negatives_per_question_per_gpu = []
+
+        total_ctxs = 0
+
+        for i, item in enumerate(global_question_ctx_vectors):
+            q_vector, ctx_vectors, interaction_mat, positive_idx, hard_negatives_idxs = item
+
+            if i != cfg.local_rank:
+                global_q_vector.append(q_vector.to(local_q_vector.device))
+                global_ctxs_vector.append(ctx_vectors.to(local_q_vector.device))
+                global_interaction_mats.append(interaction_mat.to(local_interaction_mat.device))
+                positive_idx_per_question.extend([v + total_ctxs for v in positive_idx])
+                positive_idx_per_question_per_gpu.append(positive_idx)
+                hard_negatives_per_question.extend(
+                    [[v + total_ctxs for v in l] for l in hard_negatives_idxs]
+                )
+                hard_negatives_per_question_per_gpu.append(hard_negatives_idxs)
+            else:
+                global_q_vector.append(local_q_vector)
+                global_ctxs_vector.append(local_ctx_vectors)
+                global_interaction_mats.append(local_interaction_mat)
+                positive_idx_per_question.extend(
+                    [v + total_ctxs for v in local_positive_idxs]
+                )
+                positive_idx_per_question_per_gpu.append(local_positive_idxs)
+                hard_negatives_per_question.extend(
+                    [[v + total_ctxs for v in l] for l in local_hard_negatives_idxs]
+                )
+                hard_negatives_per_question_per_gpu.append(local_hard_negatives_idxs)
+            total_ctxs += ctx_vectors.size(0)
+        global_q_vector = torch.cat(global_q_vector, dim=0)
+        global_ctxs_vector = torch.cat(global_ctxs_vector, dim=0)
+
+    else:
+        global_q_vector = local_q_vector
+        global_ctxs_vector = local_ctx_vectors
+        global_interaction_mats = [local_interaction_mat]
+        positive_idx_per_question = local_positive_idxs
+        hard_negatives_per_question = local_hard_negatives_idxs
+
+    loss, is_correct = loss_function.calc(
+        global_q_vector,
+        global_ctxs_vector,
+        global_interaction_mats,
+        positive_idx_per_question,
+        positive_idx_per_question_per_gpu,
+        hard_negatives_per_question,
+        hard_negatives_per_question_per_gpu,
+        loss_scale=loss_scale,
+    )
+
+    return loss, is_correct
+
+
 def _do_biencoder_fwd_pass(
     model: nn.Module,
     input: BiEncoderBatch,
     tensorizer: Tensorizer,
+    loss_function,
     cfg,
     encoder_type: str,
     rep_positions=0,
@@ -769,19 +872,30 @@ def _do_biencoder_fwd_pass(
                 representation_token_pos=rep_positions,
             )
 
-    local_q_vector, local_ctx_vectors = model_out
+    if len(model_out) == 2:
+        local_q_vector, local_ctx_vectors = model_out
+        loss, is_correct = _calc_loss(
+            cfg,
+            loss_function,
+            local_q_vector,
+            local_ctx_vectors,
+            input.is_positive,
+            input.hard_negatives,
+            loss_scale=loss_scale,
+        )
+    else:  # MatchBiEncoder model
+        local_q_vector, local_ctx_vectors, local_interaction_mat = model_out
+        loss, is_correct = _calc_loss_matching(
+            cfg,
+            loss_function,
+            local_q_vector,
+            local_ctx_vectors,
+            local_interaction_mat,
+            input.is_positive,
+            input.hard_negatives,
+            loss_scale=loss_scale,
+        )
 
-    loss_function = BiEncoderNllLoss()
-
-    loss, is_correct = _calc_loss(
-        cfg,
-        loss_function,
-        local_q_vector,
-        local_ctx_vectors,
-        input.is_positive,
-        input.hard_negatives,
-        loss_scale=loss_scale,
-    )
 
     is_correct = is_correct.sum().item()
 
