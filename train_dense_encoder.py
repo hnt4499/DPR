@@ -369,8 +369,8 @@ class BiEncoderTrainer(object):
                 shuffle=False,
             )
             total_ctxs = len(ctx_represenations)
-            ctxs_ids = biencoder_input.context_ids
-            ctxs_segments = biencoder_input.ctx_segments
+            ctxs_ids = biencoder_input.context_ids.to(cfg.device)
+            ctxs_segments = biencoder_input.ctx_segments.to(cfg.device)
             bsz = ctxs_ids.size(0)
 
             # get the token to be used for representation selection
@@ -384,7 +384,7 @@ class BiEncoderTrainer(object):
             for j, batch_start in enumerate(range(0, bsz, sub_batch_size)):
 
                 q_ids, q_segments = (
-                    (biencoder_input.question_ids, biencoder_input.question_segments)
+                    (biencoder_input.question_ids.to(cfg.device), biencoder_input.question_segments.to(cfg.device))
                     if j == 0
                     else (None, None)
                 )
@@ -400,7 +400,8 @@ class BiEncoderTrainer(object):
                 ]
 
                 q_attn_mask = self.tensorizer.get_attn_mask(q_ids)
-                ctx_attn_mask = self.tensorizer.get_attn_mask(ctx_ids_batch)
+                q_attn_mask = q_attn_mask if q_ids is not None else q_attn_mask
+                ctx_attn_mask = self.tensorizer.get_attn_mask(ctx_ids_batch).to(cfg.device)
                 with torch.no_grad():
                     q_dense, ctx_dense = self.biencoder(
                         q_ids,
