@@ -21,6 +21,7 @@ from typing import Tuple
 
 import hydra
 import torch
+import omegaconf
 from omegaconf import DictConfig, OmegaConf
 from torch import Tensor as T
 from torch import nn
@@ -84,6 +85,8 @@ class BiEncoderTrainer(object):
         tensorizer, model, optimizer = init_biencoder_components(
             cfg.encoder.encoder_model_type, cfg
         )
+        with omegaconf.open_dict(cfg):
+            cfg.others = DictConfig({"is_matching": isinstance(model, Match_BiEncoder)})
 
         model, optimizer = setup_for_distributed_mode(
             model,
@@ -345,7 +348,6 @@ class BiEncoderTrainer(object):
         num_hard_negatives = cfg.train.val_av_rank_hard_neg
         num_other_negatives = cfg.train.val_av_rank_other_neg
 
-        log_result_step = cfg.train.log_batch_step
         dataset = 0
         for i, samples_batch in enumerate(data_iterator.iterate_ds_data()):
             # samples += 1
@@ -421,16 +423,38 @@ class BiEncoderTrainer(object):
                 [total_ctxs + v for v in batch_positive_idxs]
             )
 
-            if (i + 1) % log_result_step == 0:
-                logger.info(
-                    "Av.rank validation: step %d, computed ctx_vectors %d, q_vectors %d",
-                    i,
-                    len(ctx_represenations),
-                    len(q_represenations),
-                )
+            logger.info(
+                "Av.rank validation: step %d, computed ctx_vectors %d, q_vectors %d",
+                i,
+                len(ctx_represenations),
+                len(q_represenations),
+            )
 
         ctx_represenations = torch.cat(ctx_represenations, dim=0)
         q_represenations = torch.cat(q_represenations, dim=0)
+
+        if cfg.others.is_matching:
+            # Need to compute by batch of contexts
+            logger.info("Average rank validation for interaction layers...")
+            num_batches = math.ceil(len(ctx_represenations) / sub_batch_size)
+            interaction_scores = []
+            for i in range(num_batches):
+                start = i * sub_batch_size
+                end = min(start + sub_batch_size, len(ctx_represenations))
+                with torch.no_grad():
+                    interaction_score = self.biencoder(
+                        q_pooled_out=q_represenations.to(cfg.device),
+                        ctx_pooled_out=ctx_represenations[start:end].to(cfg.device),
+                        is_matching=True
+                    ).cpu()
+                    interaction_scores.append(interaction_score)
+                logger.info(
+                    "Av.rank validation (interaction): step %d/%d",
+                    i, num_batches
+                )
+
+            interaction_scores = torch.cat(interaction_scores, dim=1)  # concatenate along context dim
+            logger.info("Av.rank validation (interaction): total interaction matrix size=%s", interaction_scores.size())
 
         logger.info(
             "Av.rank validation: total q_vectors size=%s", q_represenations.size()
@@ -439,6 +463,7 @@ class BiEncoderTrainer(object):
             "Av.rank validation: total ctx_vectors size=%s", ctx_represenations.size()
         )
 
+        # Calculate cosine similarity scores
         q_num = q_represenations.size(0)
         assert q_num == len(positive_idx_per_question)
 
@@ -465,7 +490,37 @@ class BiEncoderTrainer(object):
         logger.info(
             "Av.rank validation: average rank %s, total questions=%d", av_rank, q_num
         )
-        return av_rank
+
+
+        # Calculate interaction scores
+        if cfg.others.is_matching:
+            interaction_q_num = q_represenations.size(0)
+            assert interaction_q_num == len(positive_idx_per_question)
+
+            interaction_rank = 0
+            values, indices = torch.sort(interaction_scores, dim=1, descending=True)
+            for i, idx in enumerate(positive_idx_per_question):
+                # aggregate the rank of the known gold passage in the sorted results for each question
+                gold_idx = (indices[i] == idx).nonzero()
+                interaction_rank += gold_idx.item()
+
+            if distributed_factor > 1:
+                # each node calcuated its own rank, exchange the information between node and calculate the "global" average rank
+                # NOTE: the set of passages is still unique for every node
+                eval_stats = all_gather_list([interaction_rank, interaction_q_num], max_size=100)
+                for i, item in enumerate(eval_stats):
+                    remote_rank, remote_q_num = item
+                    if i != cfg.local_rank:
+                        interaction_rank += remote_rank
+                        interaction_q_num += remote_q_num
+
+            interaction_av_rank = float(interaction_rank / interaction_q_num)
+            logger.info(
+                "Av.rank validation (interaction): average rank %s, total questions=%d",
+                interaction_av_rank, interaction_q_num
+            )
+
+        return interaction_av_rank if cfg.others.is_matching else av_rank
 
     def _train_epoch(
         self,
@@ -874,9 +929,10 @@ def _do_biencoder_fwd_pass(
 
     local_q_vector, local_ctx_vectors = model_out
 
-    if not isinstance(model.module, Match_BiEncoder):
-        loss, is_correct = _calc_loss(
+    if cfg.others.is_matching:  # MatchBiEncoder model
+        loss, is_correct = _calc_loss_matching(
             cfg,
+            model,
             loss_function,
             local_q_vector,
             local_ctx_vectors,
@@ -884,10 +940,9 @@ def _do_biencoder_fwd_pass(
             input.hard_negatives,
             loss_scale=loss_scale,
         )
-    else:  # MatchBiEncoder model
-        loss, is_correct = _calc_loss_matching(
+    else:
+        loss, is_correct = _calc_loss(
             cfg,
-            model,
             loss_function,
             local_q_vector,
             local_ctx_vectors,

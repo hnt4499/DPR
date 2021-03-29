@@ -166,7 +166,7 @@ def main(cfg: DictConfig):
     with open(file, mode="wb") as f:
         pickle.dump(data, f)
 
-    logger.info("Total passages processed %d. Written to %s", len(data), file)
+    logger.info("Total passages processed %d. Written to %s", len(data), os.path.realpath(file))
 
 
 if __name__ == "__main__":
