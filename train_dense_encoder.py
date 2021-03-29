@@ -857,7 +857,8 @@ def _calc_loss_matching(
     # Distribute context vectors across GPUs, since the number of context vectors is larger than that of question vectors
     distributed_world_size = cfg.distributed_world_size or 1
     if distributed_world_size == 1:
-        global_interaction_matrix = match_model(q_pooled_out=global_q_vector, ctx_pooled_out=global_ctxs_vector)
+        global_interaction_matrix = match_model(
+            q_pooled_out=global_q_vector, ctx_pooled_out=global_ctxs_vector, is_matching=True)
     else:
         num_contexts = len(global_ctxs_vector)
         num_contexts_per_gpu = math.ceil(num_contexts / distributed_world_size)
