@@ -450,15 +450,15 @@ class Match_BiEncoder(BiEncoder):
         assert len(args) == 0 and len(kwargs) == 2
         q_pooled_out, ctx_pooled_out = kwargs["q_pooled_out"], kwargs["ctx_pooled_out"]
         # Shape
-        q_pooled_out_r = q_pooled_out.unsqueeze(-1).repeat(1, 1, ctx_pooled_out.shape[0])  # (n1, d, n2)
-        ctx_pooled_out_r = ctx_pooled_out.transpose(0, 1).unsqueeze(0).repeat(q_pooled_out.shape[0], 1, 1)  # (n1, d, n2)
+        q_pooled_out_r = q_pooled_out.unsqueeze(1).repeat(1, len(ctx_pooled_out), 1)  # (n1, n2, d)
+        ctx_pooled_out_r = ctx_pooled_out.unsqueeze(0).repeat(len(q_pooled_out), 1, 1)  # (n2, n2, d)
 
         # Interact
-        interaction_mul = q_pooled_out_r * ctx_pooled_out_r  # (n1, d, n2)
-        interaction_diff = q_pooled_out_r - ctx_pooled_out_r  # (n1, d, n2)
+        interaction_mul = q_pooled_out_r * ctx_pooled_out_r  # (n1, n2, d)
+        interaction_diff = q_pooled_out_r - ctx_pooled_out_r  # (n1, n2, d)
         interaction_mat = torch.cat(
-            [q_pooled_out_r, ctx_pooled_out_r, interaction_mul, interaction_diff], dim=1)  # (n1, 4d, n2)
-        interaction_mat = interaction_mat.transpose(1, 2).contiguous()  # (n1, n2, 4d)
+            [q_pooled_out_r, ctx_pooled_out_r, interaction_mul, interaction_diff], dim=2)  # (n1, n2, 4d)
+        del q_pooled_out_r, ctx_pooled_out_r, interaction_mul, interaction_diff
 
         # Linear projection
         interaction_mat = self.linear(interaction_mat).squeeze(-1)  # (n1, n2)
