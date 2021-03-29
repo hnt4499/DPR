@@ -26,7 +26,7 @@ from torch import Tensor as T
 from torch import nn
 
 from dpr.models import init_biencoder_components, init_loss
-from dpr.models.biencoder import BiEncoder, BiEncoderBatch
+from dpr.models.biencoder import BiEncoder, BiEncoderBatch, Match_BiEncoder
 from dpr.options import (
     setup_cfg_gpu,
     set_seed,
@@ -652,19 +652,14 @@ class BiEncoderTrainer(object):
                 self.scheduler_state = saved_state.scheduler_dict
 
 
-def _calc_loss(
+def _gather(
     cfg,
-    loss_function,
     local_q_vector,
     local_ctx_vectors,
     local_positive_idxs,
     local_hard_negatives_idxs: list = None,
-    loss_scale: float = None,
-) -> Tuple[T, bool]:
-    """
-    Calculates In-batch negatives schema loss and supports to run it in DDP mode by exchanging the representations
-    across all the nodes.
-    """
+):
+    """Helper function for `_calc*` functions to gather all needed data."""
     distributed_world_size = cfg.distributed_world_size or 1
     if distributed_world_size > 1:
         q_vector_to_send = (
@@ -722,6 +717,26 @@ def _calc_loss(
         positive_idx_per_question = local_positive_idxs
         hard_negatives_per_question = local_hard_negatives_idxs
 
+    return global_q_vector, global_ctxs_vector, positive_idx_per_question, hard_negatives_per_question
+
+
+def _calc_loss(
+    cfg,
+    loss_function,
+    local_q_vector,
+    local_ctx_vectors,
+    local_positive_idxs,
+    local_hard_negatives_idxs: list = None,
+    loss_scale: float = None,
+) -> Tuple[T, bool]:
+    """
+    Calculates In-batch negatives schema loss and supports to run it in DDP mode by exchanging the representations
+    across all the nodes.
+    """
+    # Gather data
+    gathered_data = _gather(cfg, local_q_vector, local_ctx_vectors, local_positive_idxs, local_hard_negatives_idxs)
+    global_q_vector, global_ctxs_vector, positive_idx_per_question, hard_negatives_per_question = gathered_data
+
     loss, is_correct = loss_function.calc(
         global_q_vector,
         global_ctxs_vector,
@@ -733,12 +748,44 @@ def _calc_loss(
     return loss, is_correct
 
 
+def _gather_interaction_matrices(
+    cfg,
+    local_interaction_matrix,
+):
+    """Helper function for `_calc_loss_matching` to gather computed interaction matrices."""
+    distributed_world_size = cfg.distributed_world_size or 1
+    if distributed_world_size > 1:
+        interaction_matrix_to_send = (
+            torch.empty_like(local_interaction_matrix).cpu().copy_(local_interaction_matrix).detach_()
+        )
+
+        global_interaction_matrices = all_gather_list(
+            [interaction_matrix_to_send],
+            max_size=cfg.global_loss_buf_sz,
+        )
+
+        global_interaction_matrix = []
+
+        for i, global_interaction_matrix_i in enumerate(global_interaction_matrices):
+            global_interaction_matrix_i = global_interaction_matrix_i[0]
+            if i != cfg.local_rank:
+                global_interaction_matrix.append(global_interaction_matrix_i.to(local_interaction_matrix.device))
+            else:
+                global_interaction_matrix.append(local_interaction_matrix)
+        global_interaction_matrix = torch.cat(global_interaction_matrix, dim=1)
+
+    else:
+        global_interaction_matrix = local_interaction_matrix
+
+    return global_interaction_matrix
+
+
 def _calc_loss_matching(
     cfg,
+    match_model,
     loss_function,
     local_q_vector,
     local_ctx_vectors,
-    local_interaction_mat,
     local_positive_idxs,
     local_hard_negatives_idxs: list = None,
     loss_scale: float = None,
@@ -746,86 +793,39 @@ def _calc_loss_matching(
     """
     Calculates In-batch negatives schema loss and supports to run it in DDP mode by exchanging the representations
     across all the nodes.
+    Note that this function also handle distributedly making forward call to the model to get interaction matrix.
     """
+    # Gather data
+    gathered_data = _gather(cfg, local_q_vector, local_ctx_vectors, local_positive_idxs, local_hard_negatives_idxs)
+    global_q_vector, global_ctxs_vector, positive_idx_per_question, hard_negatives_per_question = gathered_data
+
+    # Distribute context vectors across GPUs, since the number of context vectors is larger than that of question vectors
     distributed_world_size = cfg.distributed_world_size or 1
-    if distributed_world_size > 1:
-        q_vector_to_send = (
-            torch.empty_like(local_q_vector).cpu().copy_(local_q_vector).detach_()
-        )
-        ctx_vector_to_send = (
-            torch.empty_like(local_ctx_vectors).cpu().copy_(local_ctx_vectors).detach_()
-        )
-        interaction_mat_to_send = (
-            torch.empty_like(local_interaction_mat).cpu().copy_(local_interaction_mat).detach_()
-        )
-
-        global_question_ctx_vectors = all_gather_list(
-            [
-                q_vector_to_send,
-                ctx_vector_to_send,
-                interaction_mat_to_send,
-                local_positive_idxs,
-                local_hard_negatives_idxs,
-            ],
-            max_size=cfg.global_loss_buf_sz,
-        )
-
-        global_q_vector = []
-        global_ctxs_vector = []
-        global_interaction_mats = []
-
-        # ctxs_per_question = local_ctx_vectors.size(0)
-        positive_idx_per_question = []
-        positive_idx_per_question_per_gpu = []
-        hard_negatives_per_question = []
-        hard_negatives_per_question_per_gpu = []
-
-        total_ctxs = 0
-
-        for i, item in enumerate(global_question_ctx_vectors):
-            q_vector, ctx_vectors, interaction_mat, positive_idx, hard_negatives_idxs = item
-
-            if i != cfg.local_rank:
-                global_q_vector.append(q_vector.to(local_q_vector.device))
-                global_ctxs_vector.append(ctx_vectors.to(local_q_vector.device))
-                global_interaction_mats.append(interaction_mat.to(local_interaction_mat.device))
-                positive_idx_per_question.extend([v + total_ctxs for v in positive_idx])
-                positive_idx_per_question_per_gpu.append(positive_idx)
-                hard_negatives_per_question.extend(
-                    [[v + total_ctxs for v in l] for l in hard_negatives_idxs]
-                )
-                hard_negatives_per_question_per_gpu.append(hard_negatives_idxs)
-            else:
-                global_q_vector.append(local_q_vector)
-                global_ctxs_vector.append(local_ctx_vectors)
-                global_interaction_mats.append(local_interaction_mat)
-                positive_idx_per_question.extend(
-                    [v + total_ctxs for v in local_positive_idxs]
-                )
-                positive_idx_per_question_per_gpu.append(local_positive_idxs)
-                hard_negatives_per_question.extend(
-                    [[v + total_ctxs for v in l] for l in local_hard_negatives_idxs]
-                )
-                hard_negatives_per_question_per_gpu.append(local_hard_negatives_idxs)
-            total_ctxs += ctx_vectors.size(0)
-        global_q_vector = torch.cat(global_q_vector, dim=0)
-        global_ctxs_vector = torch.cat(global_ctxs_vector, dim=0)
-
+    if distributed_world_size == 1:
+        global_interaction_matrix = match_model(q_pooled_out=global_q_vector, ctx_pooled_out=global_ctxs_vector)
     else:
-        global_q_vector = local_q_vector
-        global_ctxs_vector = local_ctx_vectors
-        global_interaction_mats = [local_interaction_mat]
-        positive_idx_per_question = local_positive_idxs
-        hard_negatives_per_question = local_hard_negatives_idxs
+        num_contexts = len(global_ctxs_vector)
+        num_contexts_per_gpu = math.ceil(num_contexts / distributed_world_size)
+
+        # Get local context vectors
+        assert cfg.local_rank >= 0
+        start = cfg.local_rank * num_contexts_per_gpu
+        end = min(start + num_contexts_per_gpu, num_contexts)
+        local_ctx_vectors = global_ctxs_vector[start:end]
+
+        # Calculate interaction matrices
+        local_interaction_matrix = match_model(
+            q_pooled_out=global_q_vector, ctx_pooled_out=local_ctx_vectors, is_matching=True)
+        # Gather all interaction matrices
+        global_interaction_matrix = _gather_interaction_matrices(cfg, local_interaction_matrix)
+        assert global_interaction_matrix.shape[1] == len(global_ctxs_vector)
 
     loss, is_correct = loss_function.calc(
         global_q_vector,
         global_ctxs_vector,
-        global_interaction_mats,
+        global_interaction_matrix,
         positive_idx_per_question,
-        positive_idx_per_question_per_gpu,
         hard_negatives_per_question,
-        hard_negatives_per_question_per_gpu,
         loss_scale=loss_scale,
     )
 
@@ -872,8 +872,9 @@ def _do_biencoder_fwd_pass(
                 representation_token_pos=rep_positions,
             )
 
-    if len(model_out) == 2:
-        local_q_vector, local_ctx_vectors = model_out
+    local_q_vector, local_ctx_vectors = model_out
+
+    if not isinstance(model.module, Match_BiEncoder):
         loss, is_correct = _calc_loss(
             cfg,
             loss_function,
@@ -884,13 +885,12 @@ def _do_biencoder_fwd_pass(
             loss_scale=loss_scale,
         )
     else:  # MatchBiEncoder model
-        local_q_vector, local_ctx_vectors, local_interaction_mat = model_out
         loss, is_correct = _calc_loss_matching(
             cfg,
+            model,
             loss_function,
             local_q_vector,
             local_ctx_vectors,
-            local_interaction_mat,
             input.is_positive,
             input.hard_negatives,
             loss_scale=loss_scale,

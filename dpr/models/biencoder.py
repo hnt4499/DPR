@@ -442,10 +442,13 @@ class Match_BiEncoder(BiEncoder):
         )
         self.linear = nn.Linear(in_features=question_model.out_features * 4, out_features=1)  # linear projection
 
-    def forward(self, *args, **kwargs) -> Tuple[T, T, T]:
-        """Return an **interaction** matrix on top of the embeddings."""
-        q_pooled_out, ctx_pooled_out = super(Match_BiEncoder, self).forward(*args, **kwargs)  # (n1, d) and (n2, d)
+    def forward(self, *args, is_matching=False, **kwargs) -> Tuple[T, T, T]:
+        if not is_matching:
+            return super(Match_BiEncoder, self).forward(*args, **kwargs)
 
+        """Return an **interaction** matrix on top of the embeddings."""
+        assert len(args) == 0 and len(kwargs) == 2
+        q_pooled_out, ctx_pooled_out = kwargs["q_pooled_out"], kwargs["ctx_pooled_out"]
         # Shape
         q_pooled_out_r = q_pooled_out.unsqueeze(-1).repeat(1, 1, ctx_pooled_out.shape[0])  # (n1, d, n2)
         ctx_pooled_out_r = ctx_pooled_out.transpose(0, 1).unsqueeze(0).repeat(q_pooled_out.shape[0], 1, 1)  # (n1, d, n2)
@@ -459,7 +462,7 @@ class Match_BiEncoder(BiEncoder):
 
         # Linear projection
         interaction_mat = self.linear(interaction_mat).squeeze(-1)  # (n1, n2)
-        return q_pooled_out, ctx_pooled_out, interaction_mat
+        return interaction_mat
 
 
 class Match_BiEncoderNllLoss(BiEncoderNllLoss):
@@ -467,11 +470,9 @@ class Match_BiEncoderNllLoss(BiEncoderNllLoss):
         self,
         q_vectors: T,
         ctx_vectors: T,
-        interaction_mats: List[T],
+        interaction_matrix: T,
         positive_idx_per_question: list,
-        positive_idx_per_question_per_gpu: list,
         hard_negative_idx_per_question: list,
-        hard_negative_idx_per_question_per_gpu: list,
         loss_scale: Tuple[float, float]
     ) -> Tuple[T, int]:
         """Calculate loss for both metric learning and interaction layer."""
@@ -490,22 +491,11 @@ class Match_BiEncoderNllLoss(BiEncoderNllLoss):
             loss_scale=loss_scale[0]
         )  # "ml" stands for "metric learning"
 
-        # Calculate interaction loss; we have to compute this locally (i.e., in each GPU)
-        # TODO: make it globally
-        assert len(interaction_mats) == len(positive_idx_per_question_per_gpu) == len(hard_negative_idx_per_question_per_gpu)
-        intr_loss = []
-        intr_correct_predictions_count = 0
-
-        for interaction_mat, positive_idx_per_question_per_gpu_i in \
-                zip(interaction_mats, positive_idx_per_question_per_gpu):
-            intr_l, intr_correct_predictions_c = self.calc_given_score_matrix(
-                interaction_mat,
-                positive_idx_per_question_per_gpu_i,
-                loss_scale=loss_scale[1],
-                reduction="none")
-            intr_loss.append(intr_l)
-            intr_correct_predictions_count += intr_correct_predictions_c
-        intr_loss = torch.cat(intr_loss).mean()  # reduction
+        # Calculate interaction loss
+        intr_loss, intr_correct_predictions_count = self.calc_given_score_matrix(
+            interaction_matrix,
+            positive_idx_per_question,
+            loss_scale=loss_scale[1])
 
         # Total loss
         total_loss = ml_loss + intr_loss
