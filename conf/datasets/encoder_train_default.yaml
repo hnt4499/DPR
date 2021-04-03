@@ -4,9 +4,21 @@ nq_train:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-train
 
+nq_train_aug:
+  _target_: dpr.data.biencoder_data.JsonQADataset
+  file: data.retriever.nq-train
+  ctx_boundary_aug: 10
+  ctx_min_len: 50
+
 nq_train_hn1:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-adv-hn-train
+
+nq_train_hn1_aug:
+  _target_: dpr.data.biencoder_data.JsonQADataset
+  file: data.retriever.nq-adv-hn-train
+  ctx_boundary_aug: 10
+  ctx_min_len: 50
 
 nq_dev:
   _target_: dpr.data.biencoder_data.JsonQADataset

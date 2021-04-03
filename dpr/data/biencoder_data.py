@@ -130,6 +130,8 @@ class JsonQADataset(Dataset):
         shuffle_positives: bool = False,
         normalize: bool = False,
         query_special_suffix: str = None,
+        ctx_boundary_aug: int = 0,
+        ctx_min_len: int = 50,
     ):
         super().__init__(
             selector,
@@ -142,7 +144,9 @@ class JsonQADataset(Dataset):
         self.data_files = []
         self.data = []
         self.normalize = normalize
-        logger.info("Data files: %s", self.data_files)
+        self.ctx_boundary_aug = ctx_boundary_aug  # context span boundary augmentation
+        self.ctx_min_len = ctx_min_len  # used in conjunction with `ctx_boundary_aug`
+        logger.info("Data files: %s", self.file)
 
     def load_data(self):
         self.data_files = get_dpr_files(self.file)
@@ -151,11 +155,22 @@ class JsonQADataset(Dataset):
         self.data = [r for r in data if len(r["positive_ctxs"]) > 0]
         logger.info("Total cleaned data size: {}".format(len(self.data)))
 
+    def _boundary_aug(self, text):
+        if self.ctx_boundary_aug <= 0:
+            return text
+        text = text.split()
+        left_aug = random.randint(0, self.ctx_boundary_aug)
+        right_aug = random.randint(0, self.ctx_boundary_aug)
+        if (len(text) - left_aug - right_aug) < self.ctx_min_len:  # fall back to orignal text
+            return " ".join(text)
+        return " ".join(text[left_aug:len(text) - right_aug])
+
     def __getitem__(self, index) -> BiEncoderSample:
         json_sample = self.data[index]
         r = BiEncoderSample()
         r.query = self._process_query(json_sample["question"])
 
+        answers = json_sample["answers"]
         positive_ctxs = json_sample["positive_ctxs"]
         negative_ctxs = (
             json_sample["negative_ctxs"] if "negative_ctxs" in json_sample else []
@@ -165,6 +180,40 @@ class JsonQADataset(Dataset):
             if "hard_negative_ctxs" in json_sample
             else []
         )
+
+        # Context boundary augmentation
+        if self.ctx_boundary_aug > 0:
+            # Positives
+            extreme_hard_negative_ctxs = []  # "extremely" hard negative contexts
+            new_positive_ctxs = []
+            for ctx in positive_ctxs:
+                new_ctx = self._boundary_aug(ctx["text"])  # do boundary augmentation
+                new_ctx = {"text": new_ctx, "title": ctx.get("title", None)}
+                # check if it results in another positive context
+                if any(answer.lower() in new_ctx["text"].lower() for answer in answers):
+                    new_positive_ctxs.append(new_ctx)
+                else:
+                    new_positive_ctxs.append(ctx)
+                    extreme_hard_negative_ctxs.append(new_ctx)
+            positive_ctxs = new_positive_ctxs
+
+            # Negatives
+            new_negative_ctxs = []
+            for ctx in negative_ctxs:
+                new_ctx = self._boundary_aug(ctx["text"])
+                new_ctx = {"text": new_ctx, "title": ctx.get("title", None)}
+                new_negative_ctxs.append(new_ctx)
+            negative_ctxs = new_negative_ctxs
+
+            new_hard_negative_ctxs = []
+            for ctx in hard_negative_ctxs:
+                new_ctx = self._boundary_aug(ctx["text"])
+                new_ctx = {"text": new_ctx, "title": ctx.get("title", None)}
+                new_hard_negative_ctxs.append(new_ctx)
+            hard_negative_ctxs = new_hard_negative_ctxs
+
+            # Make "extremely" hard negative contexts more likely to be chosen
+            hard_negative_ctxs.extend(extreme_hard_negative_ctxs * 10)
 
         for ctx in positive_ctxs + negative_ctxs + hard_negative_ctxs:
             if "title" not in ctx:
