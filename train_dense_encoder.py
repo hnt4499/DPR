@@ -38,6 +38,7 @@ from dpr.options import (
 from dpr.utils.conf_utils import BiencoderDatasetsCfg
 from dpr.utils.data_utils import (
     ShardedDataIterator,
+    ShardedDataIteratorWithCategories,
     Tensorizer,
     MultiSetDataIterator,
 )
@@ -142,8 +143,11 @@ class BiEncoderTrainer(object):
         rnd.shuffle(datasets_list)
         [ds.load_data() for ds in datasets_list]
 
+        sharded_iterator_initializers = [ShardedDataIteratorWithCategories if ds.sample_by_cat else ShardedDataIterator
+                                         for ds in datasets_list]
+
         sharded_iterators = [
-            ShardedDataIterator(
+            sharded_iterator_initializer(
                 ds,
                 shard_id=self.shard_id,
                 num_shards=self.distributed_factor,
@@ -152,7 +156,7 @@ class BiEncoderTrainer(object):
                 shuffle_seed=shuffle_seed,
                 offset=offset,
             )
-            for ds in hydra_datasets
+            for ds, sharded_iterator_initializer in zip(hydra_datasets, sharded_iterator_initializers)
         ]
 
         return MultiSetDataIterator(

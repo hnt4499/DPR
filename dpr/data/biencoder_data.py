@@ -132,6 +132,9 @@ class JsonQADataset(Dataset):
         query_special_suffix: str = None,
         ctx_boundary_aug: int = 0,
         ctx_min_len: int = 50,
+        sample_by_cat: bool = False,
+        category_mapping_path: str = None,
+        sampled_idxs_path: str = None,
     ):
         super().__init__(
             selector,
@@ -146,6 +149,10 @@ class JsonQADataset(Dataset):
         self.normalize = normalize
         self.ctx_boundary_aug = ctx_boundary_aug  # context span boundary augmentation
         self.ctx_min_len = ctx_min_len  # used in conjunction with `ctx_boundary_aug`
+        self.sample_by_cat = sample_by_cat  # used to fire a signal for `data_utils.ShardedDataIterator`
+        self.sampled_idxs_path = sampled_idxs_path  # # used when `sample_by_cat` is True
+        self.category_mapping_path = category_mapping_path  # used when `sample_by_cat` is True and `sampled_idxs_path` is None
+
         logger.info("Data files: %s", self.file)
 
     def load_data(self):

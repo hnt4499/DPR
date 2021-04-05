@@ -8,13 +8,17 @@
 """
 Utilities for general purpose data processing
 """
+import os
 import json
 import logging
 import pickle
 import random
+import time
 
 import itertools
 import math
+
+import numpy as np
 import torch
 from torch import Tensor as T
 from typing import List, Iterator, Callable, Tuple
@@ -177,6 +181,143 @@ class ShardedDataIterator(object):
 
     def get_dataset(self) -> torch.utils.data.Dataset:
         return self.data
+
+
+class ShardedDataIteratorWithCategories(ShardedDataIterator):
+    """
+    General purpose data iterator to be used for Pytorch's DDP mode where every node should handle its own part of
+    the data, and where passages of the same batch should have the same category.
+    Note that for now it is designed for `JsonQADataset` dataset. It might or might not work with other datasets.
+    """
+
+    def __init__(
+        self,
+        data: torch.utils.data.Dataset,
+        shard_id: int = 0,
+        num_shards: int = 1,
+        batch_size: int = 1,
+        shuffle=True,
+        shuffle_seed: int = 0,
+        offset: int = 0,
+        strict_batch_size: bool = False,
+        category_mapping: dict = None,  # for debugging purposes
+    ):
+        super(ShardedDataIteratorWithCategories, self).__init__(
+            data,
+            shard_id=shard_id,
+            num_shards=num_shards,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            shuffle_seed=shuffle_seed,
+            offset=offset,
+            strict_batch_size=strict_batch_size
+        )
+
+        # Read sampled indices
+        self.sampled_idxs_path = data.sampled_idxs_path
+        if self.sampled_idxs_path is not None:
+            logger.info(f"Sampled indices found at {os.path.realpath(self.sampled_idxs_path)}")
+
+        # Read category mapping
+        self.category_mapping_path = data.category_mapping_path
+        if category_mapping is not None:
+            self.category_mapping = category_mapping
+        elif self.sampled_idxs_path is None:
+            logger.info(f"Reading category mapping at {os.path.realpath(self.category_mapping_path)}....")
+            with open(self.category_mapping_path, "r") as fin:
+                self.category_mapping = json.load(fin)
+
+        # Build a mapping that maps an index to wiki index and vice versa
+        # Note that we always take the first positive passage for each sample
+        logger.info("Building wiki indexing...")
+        self.wiki_mapping = {"idx2wiki": {}, "wiki2idx": {}}
+        for idx in range(len(self.data)):
+            key = "passage_id" if "passage_id" in self.data.data[idx]["positive_ctxs"][0] else "id"
+            wiki_idx = int(self.data.data[idx]["positive_ctxs"][0][key])
+
+            self.wiki_mapping["idx2wiki"][idx] = wiki_idx
+            if wiki_idx not in self.wiki_mapping["wiki2idx"]:
+                self.wiki_mapping["wiki2idx"][wiki_idx] = []
+            self.wiki_mapping["wiki2idx"][wiki_idx].append(idx)  # one passage can map to multiple indices
+
+    def get_shard_indices(self, epoch: int, return_all_indices: bool=False):
+        indices = list(range(len(self.data)))
+
+        if self.shuffle:
+            if self.sampled_idxs_path is not None:
+                with open(self.sampled_idxs_path.format(epoch), "r") as fin:
+                    indices = json.load(fin)
+            else:
+                # Sample if not exist
+                new_indices = [-1] * len(self.data)
+                not_sampled = np.ones(shape=(len(self.data),), dtype="int8")  # whether an i-th sample is not sampled
+                epoch_rnd = random.Random(self.shuffle_seed + epoch)  # to be resumable and sync
+                np_epoch_rnd = np.random.RandomState(seed=self.shuffle_seed + epoch)  # to be resumable and sync
+
+                samples_per_shard = math.ceil(len(self.data) / self.shards_num)
+                batches_per_shard = math.ceil(samples_per_shard / self.batch_size)
+
+                logger.info("Sampling indicies such that samples in the same batch have the same category. This may take a while...")
+                start = time.time()
+
+                # Log
+                log_interval = 50
+                curr_interval = 0
+                total_intervals = batches_per_shard * self.shards_num
+
+                # Iterate from batch to batch first
+                for batch_i in range(batches_per_shard):
+                    # Iterate from shard to shard later to ensure equality
+                    for shard_i in range(self.shards_num):
+                        batch_start = (shard_i * samples_per_shard + batch_i * self.batch_size)
+                        batch_end = min(batch_start + self.batch_size, (shard_i + 1) * samples_per_shard, len(self.data))
+
+                        # First sample a random sample
+                        not_sampled_idxs = not_sampled.nonzero()[0]  # sample indices that are not sampled
+                        first_sample = np_epoch_rnd.choice(not_sampled_idxs)
+                        new_indices[batch_start] = int(first_sample)
+                        not_sampled[first_sample] = 0
+
+                        # Sample samples whose category matches that of the first sample in the batch
+                        first_sample_wiki_idx = str(self.wiki_mapping["idx2wiki"][first_sample])  # weirdly key in json file is str instead of int
+                        for idx in range(batch_start + 1, batch_end):
+
+                            # Sample a random level
+                            level = epoch_rnd.choice(["l1", "l2", "l3"])
+                            cat_i = self.category_mapping[level]["id2cls"][first_sample_wiki_idx]  # category of the first sample
+
+                            # Get samples with the same level category as the first sample in the batch
+                            samples_with_same_cat_wiki_idx = self.category_mapping[level]["cls2ids"][str(cat_i)]
+                            samples_with_same_cat_idx = []
+                            for wiki_idx in samples_with_same_cat_wiki_idx:
+                                if wiki_idx in self.wiki_mapping["wiki2idx"]:
+                                    idxs = self.wiki_mapping["wiki2idx"][wiki_idx]  # candidate indices
+                                    idxs = [i for i in idxs if not_sampled[i] == 1]  # keep those not sampled
+                                    samples_with_same_cat_idx.extend(idxs)
+
+                            to_sample = samples_with_same_cat_idx
+                            if len(to_sample) == 0:  # if there is no sample with the same cat, sample randomly one from the non-sampled pool
+                                to_sample = not_sampled.nonzero()[0]
+                            # Sample a random sample from a list of candidate samples
+                            sample_i = np_epoch_rnd.choice(to_sample)
+                            new_indices[idx] = int(sample_i)
+                            not_sampled[sample_i] = 0
+
+                        # Log
+                        if curr_interval % log_interval == 0:
+                            logger.info(f"Sampling: {curr_interval}/{total_intervals}")
+                        curr_interval += 1
+
+                # Check
+                indices = new_indices
+                assert sorted(indices) == list(range(len(self.data)))
+
+                time_elapsed = time.time() - start
+                logger.info(f"Sampling took {time_elapsed:.2f}s")
+
+        if not return_all_indices:
+            indices = indices[self.shard_start_idx : self.shard_end_idx]
+        return indices
 
 
 class MultiSetDataIterator(object):
