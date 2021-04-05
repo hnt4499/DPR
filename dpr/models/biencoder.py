@@ -451,7 +451,7 @@ class Match_BiEncoder(BiEncoder):
         q_pooled_out, ctx_pooled_out = kwargs["q_pooled_out"], kwargs["ctx_pooled_out"]
         # Shape
         q_pooled_out_r = q_pooled_out.unsqueeze(1).repeat(1, len(ctx_pooled_out), 1)  # (n1, n2, d)
-        ctx_pooled_out_r = ctx_pooled_out.unsqueeze(0).repeat(len(q_pooled_out), 1, 1)  # (n2, n2, d)
+        ctx_pooled_out_r = ctx_pooled_out.unsqueeze(0).repeat(len(q_pooled_out), 1, 1)  # (n1, n2, d)
 
         # Interact
         interaction_mul = q_pooled_out_r * ctx_pooled_out_r  # (n1, n2, d)

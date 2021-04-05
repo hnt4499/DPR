@@ -40,6 +40,11 @@ class DenseIndexer(object):
     ) -> List[Tuple[List[object], List[float]]]:
         raise NotImplementedError
 
+    def search_knn_match(
+        self, query_vectors: np.array, top_docs: int
+    ) -> List[Tuple[List[object], List[object], List[float]]]:
+        raise NotImplementedError
+
     def serialize(self, file: str):
         logger.info("Serializing index to %s", file)
 
@@ -120,6 +125,18 @@ class DenseFlatIndexer(DenseIndexer):
             for query_top_idxs in indexes
         ]
         result = [(db_ids[i], scores[i]) for i in range(len(db_ids))]
+        return result
+
+    def search_knn_match(
+        self, query_vectors: np.array, top_docs: int
+    ) -> List[Tuple[List[object], List[object], List[float]]]:
+        scores, indexes = self.index.search(query_vectors, top_docs)
+        # convert to external ids
+        db_ids = [
+            [self.index_id_to_db_id[i] for i in query_top_idxs]
+            for query_top_idxs in indexes
+        ]
+        result = [(db_ids[i], indexes[i], scores[i]) for i in range(len(db_ids))]
         return result
 
     def get_index_name(self):

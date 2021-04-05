@@ -9,6 +9,7 @@
  Command line tool to get dense results and validate them
 """
 
+import math
 import glob
 import json
 import logging
@@ -19,6 +20,8 @@ from typing import List, Tuple, Dict, Iterator
 import hydra
 import numpy as np
 import torch
+import torch.nn.functional as F
+import omegaconf
 from omegaconf import DictConfig, OmegaConf
 from torch import Tensor as T
 from torch import nn
@@ -30,7 +33,7 @@ from dpr.indexer.faiss_indexers import (
     DenseIndexer,
 )
 from dpr.models import init_biencoder_components
-from dpr.models.biencoder import BiEncoder, _select_span_with_token
+from dpr.models.biencoder import BiEncoder, Match_BiEncoder, _select_span_with_token
 from dpr.options import setup_logger, setup_cfg_gpu, set_cfg_params_from_state
 from dpr.utils.data_utils import Tensorizer
 from dpr.utils.model_utils import (
@@ -176,9 +179,121 @@ class LocalFaissRetriever(DenseRetriever):
         :return:
         """
         time0 = time.time()
-        results = self.index.search_knn(query_vectors, top_docs)
+        results = self.index.search_knn(
+            query_vectors, top_docs)  # list of tuples (passage_ids, scores), one for each question input
         logger.info("index search time: %f sec.", time.time() - time0)
         self.index = None
+        return results
+
+
+class MatchLayer(nn.Module):
+    """Match layer alone (i.e., linear layer). A "dirty" workaround of Match_BiEncoder."""
+    def __init__(self, encoder: nn.Module) -> None:
+        super(MatchLayer, self).__init__()
+        self.linear = nn.Linear(in_features=encoder.out_features * 4, out_features=1)  # linear projection
+
+    def forward(
+        self,
+        q_pooled_out: torch.Tensor,  # (n_q, d)
+        ctx_pooled_out: List[torch.Tensor]  # [(top_k, d)] * n_q
+    ):
+        # Shape
+        ctx_pooled_out = torch.stack(ctx_pooled_out, dim=0)  # (n_q, top_k, d)
+        q_pooled_out = q_pooled_out.unsqueeze(1).repeat(1, ctx_pooled_out.shape[1], 1)  # (n_q, top_k, d)
+
+        # Interact
+        interaction_mul = q_pooled_out * ctx_pooled_out  # (n_q, top_k, d)
+        interaction_diff = q_pooled_out - ctx_pooled_out  # (n_q, top_k, d)
+        interaction_mat = torch.cat(
+            [q_pooled_out, ctx_pooled_out, interaction_mul, interaction_diff], dim=2)  # (n_q, top_k, 4d)
+        del q_pooled_out, ctx_pooled_out, interaction_mul, interaction_diff
+
+        # Linear projection
+        interaction_mat = self.linear(interaction_mat).squeeze(-1)  # (n_q, top_k)
+        interaction_mat = F.softmax(interaction_mat, dim=-1)  # for "score" to be meaningful
+        return interaction_mat
+
+
+
+class LocalFaissRetrieverWithMatchModels(LocalFaissRetriever):
+    """
+    Does passage retrieving over the provided index and question encoder for the match models (e.g., `Match_BiEncoder`).
+    """
+
+    def __init__(
+        self,
+        cfg: omegaconf.OmegaConf,
+        question_encoder: nn.Module,
+        match_layer: MatchLayer,
+        batch_size: int,
+        tensorizer: Tensorizer,
+        index: DenseIndexer,
+    ):
+        super().__init__(question_encoder, batch_size, tensorizer, index)
+        self.cfg = cfg
+        self.match_layer = match_layer
+
+    def get_top_docs(
+        self, query_vectors: np.array, top_docs: int = 100, top_docs_match: int = 200,
+    ) -> List[Tuple[List[object], List[float]]]:
+        """
+        Does the retrieval of the best matching passages given the query vectors batch
+        :param query_vectors:
+        :param top_docs: second-stage top-k
+        :param top_docs_match: top-stage top-k
+        :return:
+        """
+        # First stage: get top docs
+        time0 = time.time()
+        results_first_stage = self.index.search_knn_match(
+            query_vectors, top_docs_match)  # list of tuples (passage_ids, ids, scores), one for each question input
+        logger.info("First stage: index search time: %f sec.", time.time() - time0)
+
+        # Second stage
+        time0 = time.time()
+
+        # Reconstruct context vectors
+        context_vectors = []
+        passage_idxs = []
+        for passage_ids, ids, _ in results_first_stage:
+            context_vector_i = []
+            for id in ids:
+                context_vector_i.append(self.index.index.reconstruct(int(id)))
+            context_vector_i = np.stack(context_vector_i, axis=0)  # (top_k, d)
+            context_vectors.append(context_vector_i)
+            passage_idxs.append(passage_ids)
+
+        # Inference by batch
+        assert len(query_vectors) == len(context_vectors)
+        num_batches = math.ceil(len(query_vectors) / self.batch_size)
+        interaction_mats = []
+
+        for batch in range(num_batches):
+            start = batch * self.batch_size
+            end = min(start + self.batch_size, len(query_vectors))
+
+            query_vectors_i = torch.from_numpy(query_vectors[start:end]).to(self.cfg.device)  # (n_q_i, d)
+            context_vectors_i = [torch.from_numpy(context_vector).to(self.cfg.device)
+                                 for context_vector in context_vectors[start:end]]  # (top_docs_match, d) * n_q_i
+
+            with torch.no_grad():
+                interaction_mat = self.match_layer(query_vectors_i, context_vectors_i)  # (n_q_i, top_docs_match)
+                interaction_mats.append(interaction_mat.cpu().numpy())
+
+        # Compute second-stage top-k
+        interaction_mats = np.concatenate(interaction_mats, axis=0)  # (n_q, top_docs_match)
+        top_k_idxs = np.argsort(interaction_mats, axis=1)[:, -top_docs:][:, ::-1]  # (n_q, top_docs)
+        top_k_scores = np.take_along_axis(interaction_mats, top_k_idxs, axis=1)  # (n_q, top_docs)
+
+        # Convert to external indices
+        assert len(top_k_idxs) == len(passage_idxs)
+        top_k_db_idxs = [
+            [passage_ids[i] for i in query_top_idxs]
+            for query_top_idxs, passage_ids in zip(top_k_idxs, passage_idxs)
+        ]
+
+        logger.info("Second stage: index search time: %f sec.", time.time() - time0)
+        results = [(top_k_db_idxs[i], top_k_scores[i]) for i in range(len(top_k_db_idxs))]
         return results
 
 
@@ -294,6 +409,8 @@ def main(cfg: DictConfig):
     tensorizer, encoder, _ = init_biencoder_components(
         cfg.encoder.encoder_model_type, cfg, inference_only=True
     )
+    with omegaconf.open_dict(cfg):
+        cfg.others = DictConfig({"is_matching": isinstance(encoder, Match_BiEncoder)})
 
     encoder_path = cfg.encoder_path
     if encoder_path:
@@ -307,6 +424,13 @@ def main(cfg: DictConfig):
         encoder, None, cfg.device, cfg.n_gpu, cfg.local_rank, cfg.fp16
     )
     encoder.eval()
+
+    if cfg.others.is_matching:
+        match_layer = MatchLayer(encoder=get_model_obj(encoder))
+        match_layer, _ = setup_for_distributed_mode(
+            match_layer, None, cfg.device, cfg.n_gpu, cfg.local_rank, cfg.fp16
+        )
+        match_layer.eval()
 
     # load weights from the model file
     model_to_load = get_model_obj(encoder)
@@ -324,6 +448,15 @@ def main(cfg: DictConfig):
     model_to_load.load_state_dict(question_encoder_state)
     vector_size = model_to_load.get_out_size()
     logger.info("Encoder vector_size=%d", vector_size)
+
+    # load weights from the model file for the match layer
+    if cfg.others.is_matching:
+        model_to_load = get_model_obj(match_layer)
+        logger.info("Loading saved match layer state ...")
+
+        match_layer_state = {key: value for key, value in saved_state.model_dict.items()
+                             if key.startswith("linear")}
+        model_to_load.load_state_dict(match_layer_state)
 
     # get questions & answers
     questions = []
@@ -348,7 +481,11 @@ def main(cfg: DictConfig):
     logger.info("Index class %s ", type(index))
     index_buffer_sz = index.buffer_size
     index.init_index(vector_size)
-    retriever = LocalFaissRetriever(encoder, cfg.batch_size, tensorizer, index)
+
+    if not cfg.others.is_matching:
+        retriever = LocalFaissRetriever(encoder, cfg.batch_size, tensorizer, index)
+    else:
+        retriever = LocalFaissRetrieverWithMatchModels(cfg, encoder, match_layer, cfg.batch_size, tensorizer, index)
 
     logger.info("Using special token %s", qa_src.special_query_token)
     questions_tensor = retriever.generate_question_vectors(
@@ -404,7 +541,11 @@ def main(cfg: DictConfig):
             retriever.index.serialize(index_path)
 
     # get top k results
-    top_ids_and_scores = retriever.get_top_docs(questions_tensor.numpy(), cfg.n_docs)
+    if cfg.others.is_matching:
+        top_ids_and_scores = retriever.get_top_docs(
+            questions_tensor.numpy(), top_docs=cfg.n_docs, top_docs_match=cfg.n_docs_match)
+    else:
+        top_ids_and_scores = retriever.get_top_docs(questions_tensor.numpy(), top_docs=cfg.n_docs)
 
     # we no longer need the index
     retriever = None
