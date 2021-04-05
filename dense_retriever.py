@@ -606,7 +606,7 @@ def main(cfg: DictConfig):
             cfg.out_file,
         )
         if cfg.others.is_matching:
-            out_file, _ = os.path.splitext(cfg.outfile)
+            out_file, _ = os.path.splitext(cfg.out_file)
             out_file = f"{out_file}_match.json"
             save_results(
                 all_passages,
