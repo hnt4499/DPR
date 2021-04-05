@@ -9,6 +9,7 @@
  Command line tool to get dense results and validate them
 """
 
+import os
 import math
 import glob
 import json
@@ -293,8 +294,9 @@ class LocalFaissRetrieverWithMatchModels(LocalFaissRetriever):
         ]
 
         logger.info("Second stage: index search time: %f sec.", time.time() - time0)
-        results = [(top_k_db_idxs[i], top_k_scores[i]) for i in range(len(top_k_db_idxs))]
-        return results
+        results_first_stage = [(passage_ids, scores) for passage_ids, ids, scores in results_first_stage]
+        results_second_stage = [(top_k_db_idxs[i], top_k_scores[i]) for i in range(len(top_k_db_idxs))]
+        return results_first_stage, results_second_stage
 
 
 def validate(
@@ -456,6 +458,7 @@ def main(cfg: DictConfig):
 
         match_layer_state = {key: value for key, value in saved_state.model_dict.items()
                              if key.startswith("linear")}
+        logger.info(f"Loading saved match layer state with {len(match_layer_state)} weight matrices...")
         model_to_load.load_state_dict(match_layer_state)
 
     # get questions & answers
@@ -542,8 +545,9 @@ def main(cfg: DictConfig):
 
     # get top k results
     if cfg.others.is_matching:
-        top_ids_and_scores = retriever.get_top_docs(
+        top_ids_and_scores_first_stage, top_ids_and_scores_second_stage = retriever.get_top_docs(
             questions_tensor.numpy(), top_docs=cfg.n_docs, top_docs_match=cfg.n_docs_match)
+        top_ids_and_scores = top_ids_and_scores_first_stage
     else:
         top_ids_and_scores = retriever.get_top_docs(questions_tensor.numpy(), top_docs=cfg.n_docs)
 
@@ -567,6 +571,14 @@ def main(cfg: DictConfig):
             cfg.validation_workers,
             cfg.match,
         )
+        if cfg.others.is_matching:
+            questions_doc_hits_match = validate_tables(
+                all_passages,
+                question_answers,
+                top_ids_and_scores_second_stage,
+                cfg.validation_workers,
+                cfg.match,
+            )
     else:
         questions_doc_hits = validate(
             all_passages,
@@ -575,6 +587,14 @@ def main(cfg: DictConfig):
             cfg.validation_workers,
             cfg.match,
         )
+        if cfg.others.is_matching:
+            questions_doc_hits_match = validate(
+                all_passages,
+                question_answers,
+                top_ids_and_scores_second_stage,
+                cfg.validation_workers,
+                cfg.match,
+            )
 
     if cfg.out_file:
         save_results(
@@ -585,6 +605,17 @@ def main(cfg: DictConfig):
             questions_doc_hits,
             cfg.out_file,
         )
+        if cfg.others.is_matching:
+            out_file, _ = os.path.splitext(cfg.outfile)
+            out_file = f"{out_file}_match.json"
+            save_results(
+                all_passages,
+                questions,
+                question_answers,
+                top_ids_and_scores_second_stage,
+                questions_doc_hits_match,
+                out_file,
+            )
 
     if cfg.kilt_out_file:
         kilt_ctx = next(
