@@ -32,10 +32,15 @@ def set_cfg_params_from_state(state: dict, cfg: DictConfig):
         return
     cfg.do_lower_case = state["do_lower_case"]
     cfg.encoder.pretrained_model_cfg = state["pretrained_model_cfg"]
-    cfg.encoder.encoder_model_type = state["encoder_model_type"]
     cfg.encoder.pretrained_file = state["pretrained_file"]
     cfg.encoder.projection_dim = state["projection_dim"]
     cfg.encoder.sequence_length = state["sequence_length"]
+
+    if cfg.encoder.encoder_model_type != state["encoder_model_type"]:
+        logger.warn(f"Model type specified in the config file ('{cfg.encoder.encoder_model_type}') and model type "
+                    f"obtained from the checkpoint ('{state['encoder_model_type']}') are different")
+        if not cfg.ignore_pretrained_model_type:
+            cfg.encoder.encoder_model_type = state["encoder_model_type"]
 
 
 def get_encoder_params_state_from_cfg(cfg: DictConfig):

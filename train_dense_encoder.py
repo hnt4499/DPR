@@ -27,7 +27,7 @@ from torch import Tensor as T
 from torch import nn
 
 from dpr.models import init_biencoder_components, init_loss
-from dpr.models.biencoder import BiEncoder, BiEncoderBatch, Match_BiEncoder
+from dpr.models.biencoder import BiEncoder, BiEncoderBatch, Match_BiEncoder, MatchGated_BiEncoder
 from dpr.options import (
     setup_cfg_gpu,
     set_seed,
@@ -87,7 +87,7 @@ class BiEncoderTrainer(object):
             cfg.encoder.encoder_model_type, cfg
         )
         with omegaconf.open_dict(cfg):
-            cfg.others = DictConfig({"is_matching": isinstance(model, Match_BiEncoder)})
+            cfg.others = DictConfig({"is_matching": isinstance(model, (Match_BiEncoder, MatchGated_BiEncoder))})
 
         model, optimizer = setup_for_distributed_mode(
             model,
@@ -262,7 +262,7 @@ class BiEncoderTrainer(object):
 
         total_loss = 0.0
         start_time = time.time()
-        total_correct_predictions = 0
+        total_correct_predictions, total_correct_predictions_matching = 0, 0
         num_hard_negatives = cfg.train.hard_negatives
         num_other_negatives = cfg.train.other_negatives
         log_result_step = cfg.train.log_batch_step
@@ -289,7 +289,7 @@ class BiEncoderTrainer(object):
             )
             encoder_type = ds_cfg.encoder_type
 
-            loss, correct_cnt = _do_biencoder_fwd_pass(
+            outp = _do_biencoder_fwd_pass(
                 self.biencoder,
                 biencoder_input,
                 self.tensorizer,
@@ -298,6 +298,12 @@ class BiEncoderTrainer(object):
                 encoder_type=encoder_type,
                 rep_positions=rep_positions,
             )
+            if cfg.others.is_matching:
+                loss, correct_cnt, correct_cnt_matching = outp
+                total_correct_predictions_matching += correct_cnt_matching
+            else:
+                loss, correct_cnt = outp
+
             total_loss += loss.item()
             total_correct_predictions += correct_cnt
             batches += 1
@@ -312,13 +318,15 @@ class BiEncoderTrainer(object):
         total_loss = total_loss / batches
         total_samples = batches * cfg.train.dev_batch_size * self.distributed_factor
         correct_ratio = float(total_correct_predictions / total_samples)
-        logger.info(
-            "NLL Validation: loss = %f. correct prediction ratio  %d/%d ~  %f",
-            total_loss,
-            total_correct_predictions,
-            total_samples,
-            correct_ratio,
-        )
+        to_log = (f"NLL Validation: loss = {total_loss:.4f} correct prediction ratio  "
+                  f"{total_correct_predictions}/{total_samples} ~ {correct_ratio:.4f}")
+
+        if cfg.others.is_matching:
+            correct_ratio_matching = float(total_correct_predictions_matching / total_samples)
+            to_log += (f", matching correct prediction ratio {total_correct_predictions_matching}/{total_samples}"
+                       f" ~ {correct_ratio_matching:.4f}")
+        logger.info(to_log)
+
         return total_loss
 
     def validate_average_rank(self) -> float:
@@ -496,7 +504,6 @@ class BiEncoderTrainer(object):
             "Av.rank validation: average rank %s, total questions=%d", av_rank, q_num
         )
 
-
         # Calculate interaction scores
         if cfg.others.is_matching:
             interaction_q_num = q_represenations.size(0)
@@ -538,7 +545,7 @@ class BiEncoderTrainer(object):
         cfg = self.cfg
         rolling_train_loss = 0.0
         epoch_loss = 0
-        epoch_correct_predictions = 0
+        epoch_correct_predictions, epoch_correct_predictions_matching = 0, 0
 
         log_result_step = cfg.train.log_batch_step
         rolling_loss_step = cfg.train.train_rolling_loss_step
@@ -588,7 +595,7 @@ class BiEncoderTrainer(object):
             loss_scale = (
                 cfg.loss_scale_factors[dataset] if cfg.loss_scale_factors else None
             )
-            loss, correct_cnt = _do_biencoder_fwd_pass(
+            outp = _do_biencoder_fwd_pass(
                 self.biencoder,
                 biencoder_batch,
                 self.tensorizer,
@@ -598,6 +605,11 @@ class BiEncoderTrainer(object):
                 rep_positions=rep_positions,
                 loss_scale=loss_scale,
             )
+            if cfg.others.is_matching:
+                loss, correct_cnt, correct_cnt_matching = outp
+                epoch_correct_predictions_matching += correct_cnt_matching
+            else:
+                loss, correct_cnt = outp
 
             epoch_correct_predictions += correct_cnt
             epoch_loss += loss.item()
@@ -664,6 +676,8 @@ class BiEncoderTrainer(object):
         epoch_loss = (epoch_loss / epoch_batches) if epoch_batches > 0 else 0
         logger.info("Av Loss per epoch=%f", epoch_loss)
         logger.info("epoch total correct predictions=%d", epoch_correct_predictions)
+        if cfg.others.is_matching:
+            logger.info("epoch total correct matching predictions=%d", epoch_correct_predictions_matching)
 
     def _save_checkpoint(self, scheduler, epoch: int, offset: int) -> str:
         cfg = self.cfg
@@ -881,7 +895,7 @@ def _calc_loss_matching(
         global_interaction_matrix = _gather_interaction_matrices(cfg, local_interaction_matrix)
         assert global_interaction_matrix.shape[1] == len(global_ctxs_vector)
 
-    loss, is_correct = loss_function.calc(
+    loss, ml_is_correct, matching_is_correct = loss_function.calc(
         global_q_vector,
         global_ctxs_vector,
         global_interaction_matrix,
@@ -890,7 +904,7 @@ def _calc_loss_matching(
         loss_scale=loss_scale,
     )
 
-    return loss, is_correct
+    return loss, ml_is_correct, matching_is_correct
 
 
 def _do_biencoder_fwd_pass(
@@ -936,7 +950,7 @@ def _do_biencoder_fwd_pass(
     local_q_vector, local_ctx_vectors = model_out
 
     if cfg.others.is_matching:  # MatchBiEncoder model
-        loss, is_correct = _calc_loss_matching(
+        loss, ml_is_correct, matching_is_correct = _calc_loss_matching(
             cfg,
             model,
             loss_function,
@@ -946,6 +960,8 @@ def _do_biencoder_fwd_pass(
             input.hard_negatives,
             loss_scale=loss_scale,
         )
+        ml_is_correct = ml_is_correct.sum().item()
+        matching_is_correct = matching_is_correct.sum().item()
     else:
         loss, is_correct = _calc_loss(
             cfg,
@@ -956,15 +972,17 @@ def _do_biencoder_fwd_pass(
             input.hard_negatives,
             loss_scale=loss_scale,
         )
-
-
-    is_correct = is_correct.sum().item()
+        is_correct = is_correct.sum().item()
 
     if cfg.n_gpu > 1:
         loss = loss.mean()
     if cfg.train.gradient_accumulation_steps > 1:
         loss = loss / cfg.gradient_accumulation_steps
-    return loss, is_correct
+
+    if cfg.others.is_matching:
+        return loss, ml_is_correct, matching_is_correct
+    else:
+        return loss, is_correct
 
 
 @hydra.main(config_path="conf", config_name="biencoder_train_cfg")

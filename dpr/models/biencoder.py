@@ -355,7 +355,15 @@ class BiEncoder(nn.Module):
         if "question_model.embeddings.position_ids" in saved_state.model_dict:
             del saved_state.model_dict["question_model.embeddings.position_ids"]
             del saved_state.model_dict["ctx_model.embeddings.position_ids"]
-        self.load_state_dict(saved_state.model_dict)
+
+        # Calculate number of parameters
+        count = 0
+        for name, weight in saved_state.model_dict.items():
+            count += weight.numel()
+        logger.info(f"Loading {count} parameters...")
+
+        # TODO: remove this workaround
+        self.load_state_dict(saved_state.model_dict, strict=False)
 
     def get_state_dict(self):
         return self.state_dict()
@@ -436,11 +444,19 @@ class Match_BiEncoder(BiEncoder):
         ctx_model: nn.Module,
         fix_q_encoder: bool = False,
         fix_ctx_encoder: bool = False,
+        freeze_encoders: bool = False,  # useful for finetuning
     ):
         super(Match_BiEncoder, self).__init__(
             question_model, ctx_model, fix_q_encoder=fix_q_encoder, fix_ctx_encoder=fix_ctx_encoder
         )
         self.linear = nn.Linear(in_features=question_model.out_features * 4, out_features=1)  # linear projection
+
+        assert freeze_encoders is not None
+        if freeze_encoders:
+            for name, parameter in question_model.named_parameters():
+                parameter.requires_grad = False
+            for name, parameter in ctx_model.named_parameters():
+                parameter.requires_grad = False
 
     def forward(self, *args, is_matching=False, **kwargs) -> Tuple[T, T, T]:
         if not is_matching:
@@ -474,7 +490,7 @@ class Match_BiEncoderNllLoss(BiEncoderNllLoss):
         positive_idx_per_question: list,
         hard_negative_idx_per_question: list,
         loss_scale: Tuple[float, float]
-    ) -> Tuple[T, int]:
+    ) -> Tuple[T, int, int]:
         """Calculate loss for both metric learning and interaction layer."""
 
         if loss_scale is not None:
@@ -500,7 +516,76 @@ class Match_BiEncoderNllLoss(BiEncoderNllLoss):
         # Total loss
         total_loss = ml_loss + intr_loss
 
-        return total_loss, intr_correct_predictions_count
+        return total_loss, ml_correct_predictions_count, intr_correct_predictions_count
+
+
+class MatchGated_BiEncoder(BiEncoder):
+    def __init__(
+        self,
+        question_model: nn.Module,
+        ctx_model: nn.Module,
+        fix_q_encoder: bool = False,
+        fix_ctx_encoder: bool = False,
+        freeze_encoders: bool = False,  # useful for finetuning
+    ):
+        super(MatchGated_BiEncoder, self).__init__(
+            question_model, ctx_model, fix_q_encoder=fix_q_encoder, fix_ctx_encoder=fix_ctx_encoder
+        )
+        assert question_model.out_features == ctx_model.out_features
+        embedding_size = question_model.out_features
+
+        # format: linear_in_out
+        self.linear_context_question = nn.Linear(in_features=embedding_size, out_features=embedding_size)
+        self.linear_question_question = nn.Linear(in_features=embedding_size, out_features=embedding_size)
+        self.linear_context_context = nn.Linear(in_features=embedding_size, out_features=embedding_size)
+        self.linear_question_context = nn.Linear(in_features=embedding_size, out_features=embedding_size)
+        self.sigmoid = nn.Sigmoid()
+
+        assert freeze_encoders is not None
+        if freeze_encoders:
+            for name, parameter in question_model.named_parameters():
+                parameter.requires_grad = False
+            for name, parameter in ctx_model.named_parameters():
+                parameter.requires_grad = False
+
+    def forward(self, *args, is_matching=False, **kwargs) -> Tuple[T, T, T]:
+        if not is_matching:
+            return super(MatchGated_BiEncoder, self).forward(*args, **kwargs)
+
+        """Return an **interaction** matrix on top of the embeddings."""
+        assert len(args) == 0 and len(kwargs) == 2
+        q_pooled_out, ctx_pooled_out = kwargs["q_pooled_out"], kwargs["ctx_pooled_out"]  # (n1, d), (n2, d)
+        question = q_pooled_out.unsqueeze(1)  # (n1, 1, d)
+        context = ctx_pooled_out.unsqueeze(0)  # (1, n2, d)
+        del q_pooled_out, ctx_pooled_out
+
+        # Question gate
+        question_q = self.linear_question_question(question)  # (n1, 1, d)
+        question_c = self.linear_context_question(context)  # (1, n2, d)
+        question_gate = self.sigmoid(question_q + question_c)  # (n1, n2, d)
+        del question_q, question_c
+
+        # Context gate
+        context_q = self.linear_question_context(question)  # (n1, 1, d)
+        context_c = self.linear_context_context(context)  # (1, n2, d)
+        context_gate = self.sigmoid(context_q + context_c)  # (n1, n2, d)
+        del context_q, context_c
+
+        # Apply question gate
+        question = question * question_gate  # (n1, n2, d)
+        del question_gate
+
+        # Apply context gate
+        context = context * context_gate  # (n1, n2, d)
+        del context_gate
+
+        # Calculate elementwise dot product
+        interaction_mat = (question * context).sum(-1)  # (n1, n2)
+        return interaction_mat
+
+
+class MatchGated_BiEncoderNllLoss(Match_BiEncoderNllLoss):
+    pass
 
 
 def _select_span_with_token(

@@ -21,6 +21,7 @@ checkpoint_file_name: dpr_biencoder
 
 # A trained bi-encoder checkpoint file to initialize the model
 model_file:
+ignore_pretrained_model_type: false
 
 # TODO: move to a conf group
 # local_rank for distributed training on gpus

@@ -21,7 +21,7 @@ from transformers.modeling_bert import BertConfig, BertModel
 from transformers.optimization import AdamW
 from transformers.tokenization_bert import BertTokenizer
 
-from dpr.models.biencoder import Match_BiEncoder
+from dpr.models.biencoder import MatchGated_BiEncoder
 from dpr.utils.data_utils import Tensorizer
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ def get_bert_biencoder_components(cfg, inference_only: bool = False, **kwargs):
 
     fix_ctx_encoder = cfg.fix_ctx_encoder if hasattr(cfg, "fix_ctx_encoder") else False
 
-    biencoder = Match_BiEncoder(
+    biencoder = MatchGated_BiEncoder(
         question_encoder, ctx_encoder, fix_ctx_encoder=fix_ctx_encoder, freeze_encoders=cfg.encoder.freeze_encoders,
     )
 
@@ -121,7 +121,7 @@ def get_optimizer(
     return optimizer
 
 
-def get_bert_tokenizer(pretrained_cfg_name: str, biencoder: Match_BiEncoder, do_lower_case: bool = True):
+def get_bert_tokenizer(pretrained_cfg_name: str, biencoder: MatchGated_BiEncoder, do_lower_case: bool = True):
     """If needed, this tokenizer will be added one special token [QST] representing the question token"""
     tokenizer = BertTokenizer.from_pretrained(
         pretrained_cfg_name, do_lower_case=do_lower_case
