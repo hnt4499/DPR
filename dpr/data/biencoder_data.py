@@ -150,7 +150,7 @@ class JsonQADataset(Dataset):
         self.ctx_boundary_aug = ctx_boundary_aug  # context span boundary augmentation
         self.ctx_min_len = ctx_min_len  # used in conjunction with `ctx_boundary_aug`
         self.sample_by_cat = sample_by_cat  # used to fire a signal for `data_utils.ShardedDataIterator`
-        self.sampled_idxs_path = sampled_idxs_path  # # used when `sample_by_cat` is True
+        self.sampled_idxs_path = sampled_idxs_path  # used when `sample_by_cat` is True
         self.category_mapping_path = category_mapping_path  # used when `sample_by_cat` is True and `sampled_idxs_path` is None
 
         logger.info("Data files: %s", self.file)

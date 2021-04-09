@@ -229,18 +229,22 @@ class ShardedDataIteratorWithCategories(ShardedDataIterator):
 
         # Build a mapping that maps an index to wiki index and vice versa
         # Note that we always take the first positive passage for each sample
-        logger.info("Building wiki indexing...")
-        self.wiki_mapping = {"idx2wiki": {}, "wiki2idx": {}}
-        for idx in range(len(self.data)):
-            key = "passage_id" if "passage_id" in self.data.data[idx]["positive_ctxs"][0] else "id"
-            wiki_idx = int(self.data.data[idx]["positive_ctxs"][0][key])
+        if self.sampled_idxs_path is None:
+            logger.info("Building wiki indexing...")
+            self.wiki_mapping = {"idx2wiki": {}, "wiki2idx": {}}
+            for idx in range(len(self.data)):
+                key = "passage_id" if "passage_id" in self.data.data[idx]["positive_ctxs"][0] else "id"
+                wiki_idx = int(self.data.data[idx]["positive_ctxs"][0][key])
 
-            self.wiki_mapping["idx2wiki"][idx] = wiki_idx
-            if wiki_idx not in self.wiki_mapping["wiki2idx"]:
-                self.wiki_mapping["wiki2idx"][wiki_idx] = []
-            self.wiki_mapping["wiki2idx"][wiki_idx].append(idx)  # one passage can map to multiple indices
+                self.wiki_mapping["idx2wiki"][idx] = wiki_idx
+                if wiki_idx not in self.wiki_mapping["wiki2idx"]:
+                    self.wiki_mapping["wiki2idx"][wiki_idx] = []
+                self.wiki_mapping["wiki2idx"][wiki_idx].append(idx)  # one passage can map to multiple indices
 
-    def get_shard_indices(self, epoch: int, return_all_indices: bool=False):
+    def get_shard_indices(
+        self, epoch: int,
+        return_all_indices: bool=False,  # for pre-generating indices only
+    ):
         indices = list(range(len(self.data)))
 
         if self.shuffle:
@@ -308,12 +312,12 @@ class ShardedDataIteratorWithCategories(ShardedDataIterator):
                             logger.info(f"Sampling: {curr_interval}/{total_intervals}")
                         curr_interval += 1
 
-                # Check
                 indices = new_indices
-                assert sorted(indices) == list(range(len(self.data)))
-
                 time_elapsed = time.time() - start
                 logger.info(f"Sampling took {time_elapsed:.2f}s")
+
+        # Check
+        assert sorted(indices) == list(range(len(self.data)))
 
         if not return_all_indices:
             indices = indices[self.shard_start_idx : self.shard_end_idx]
