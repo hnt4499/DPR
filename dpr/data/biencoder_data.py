@@ -220,7 +220,8 @@ class JsonQADataset(Dataset):
             hard_negative_ctxs = new_hard_negative_ctxs
 
             # Make "extremely" hard negative contexts more likely to be chosen
-            hard_negative_ctxs.extend(extreme_hard_negative_ctxs * 10)
+            to_add = 1 if len(hard_negative_ctxs) == 0 else len(hard_negative_ctxs)
+            hard_negative_ctxs.extend(extreme_hard_negative_ctxs * to_add)
 
         for ctx in positive_ctxs + negative_ctxs + hard_negative_ctxs:
             if "title" not in ctx:
