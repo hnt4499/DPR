@@ -8,6 +8,7 @@ from typing import Dict, List, Tuple
 
 import hydra
 import jsonlines
+import pandas as pd
 import numpy as np
 import torch
 from omegaconf import DictConfig
@@ -252,6 +253,169 @@ class JsonQADataset(Dataset):
             [s["answers"] for s in self.data[start_idx:end_idx]],
         )
 
+
+class JsonQADatasetWithAllPassages(JsonQADataset):
+    """Scalable dataset with a dataframe of all (necessary) passages"""
+    def __init__(
+        self,
+        file: str,
+        all_passages_file: str,
+        selector: DictConfig = None,
+        special_token: str = None,
+        encoder_type: str = None,
+        shuffle_positives: bool = False,
+        normalize: bool = False,
+        query_special_suffix: str = None,
+        ctx_boundary_aug: int = 0,
+        sample_by_cat: bool = False,
+        category_mapping_path: str = None,
+        sampled_idxs_path: str = None,
+    ):
+
+        super(JsonQADatasetWithAllPassages, self).__init__(
+            file=file,
+            selector=selector,
+            special_token=special_token,
+            encoder_type=encoder_type,
+            shuffle_positives=shuffle_positives,
+            normalize=normalize,
+            query_special_suffix=query_special_suffix,
+            ctx_boundary_aug=ctx_boundary_aug,
+            ctx_min_len=50,  # not used
+            sample_by_cat=sample_by_cat,
+            category_mapping_path=category_mapping_path,
+            sampled_idxs_path=sampled_idxs_path,
+        )
+        self.all_passages_file = all_passages_file
+
+    def load_data(self, datasets: List[torch.utils.data.Dataset]):
+        super(JsonQADatasetWithAllPassages, self).load_data()
+
+        # Retrieve all passages if possible
+        all_passages = None
+        for dataset in datasets:
+            if hasattr(dataset, "all_passages"):
+                if all_passages is None:
+                    all_passages = dataset.all_passages
+                else:
+                    assert all_passages == dataset.all_passages
+
+        # If not possible, read it in
+        if all_passages is None:
+            logger.info(f"Reading all passages at {os.path.realpath(self.all_passages_file)}")
+            self.all_passages = pd.read_csv(self.all_passages_file, index_col=0)
+        else:
+            self.all_passages = all_passages
+
+    def _boundary_aug(self, index):
+        data = self.all_passages.loc[index]
+        text, title = data[["text", "title"]]
+
+        if self.ctx_boundary_aug <= 0:
+            if title in ["nan", "NaN"]:
+                title = None
+            return text, text, title
+
+        # Previous passage
+        length_to_augment = [0]  # 0 means no augmentation
+        if index - 1 in self.all_passages.index and self.all_passages.loc[index - 1, "title"] == title:
+            prev_passage = self.all_passages.loc[index - 1, "text"]
+            length_to_augment.extend(range(-self.ctx_boundary_aug, 0))
+
+        # Next passage
+        if index + 1 in self.all_passages.index and self.all_passages.loc[index + 1, "title"] == title:
+            next_passage = self.all_passages.loc[index + 1, "text"]
+            length_to_augment.extend(range(1, self.ctx_boundary_aug + 1))
+
+        length_to_augment = random.choice(length_to_augment)
+        aug_text = text.split()
+        original_length = len(aug_text)
+
+        if length_to_augment < 0:  # augment with previous passage
+            prev_passage = prev_passage.split()
+            aug_text = prev_passage[length_to_augment:] + aug_text[:length_to_augment]
+            assert len(aug_text) == original_length, (text, " ".join(aug_text))
+        elif length_to_augment > 0:  # augment with next passage
+            next_passage = next_passage.split()
+            aug_text = aug_text[length_to_augment:] + next_passage[:length_to_augment]
+            assert len(aug_text) == original_length, (text, " ".join(aug_text))
+
+        aug_text = " ".join(aug_text)
+        if title in ["nan", "NaN"]:
+            title = None
+
+        return text, aug_text, title
+
+    def __getitem__(self, index) -> BiEncoderSample:
+        json_sample = self.data[index]
+        r = BiEncoderSample()
+        r.query = self._process_query(json_sample["question"])
+
+        answers = json_sample["answers"]
+        positive_ctxs = json_sample["positive_ctxs"]
+        negative_ctxs = (
+            json_sample["negative_ctxs"] if "negative_ctxs" in json_sample else []
+        )
+        hard_negative_ctxs = (
+            json_sample["hard_negative_ctxs"]
+            if "hard_negative_ctxs" in json_sample
+            else []
+        )
+
+        # Context boundary augmentation
+
+        # Positives
+        extreme_hard_negative_ctxs = []  # "extremely" hard negative contexts
+        new_positive_ctxs = []
+        for ctx in positive_ctxs:
+            passage_id = int(ctx["id"])
+            ctx, aug_ctx, title = self._boundary_aug(passage_id)  # do boundary augmentation
+            orig_ctx = {"text": ctx, "title": title}
+            aug_ctx = {"text": aug_ctx, "title": title}
+
+            # Check if it results in another positive context
+            if any(answer.lower() in aug_ctx["text"].lower() for answer in answers):
+                new_positive_ctxs.append(aug_ctx)
+            else:
+                new_positive_ctxs.append(orig_ctx)
+                extreme_hard_negative_ctxs.append(aug_ctx)
+        positive_ctxs = new_positive_ctxs
+
+        # Negatives
+        new_negative_ctxs = []
+        for ctx in negative_ctxs:
+            passage_id = int(ctx["id"])
+            ctx, aug_ctx, title = self._boundary_aug(passage_id)  # we assume that this does not result in positive passage
+            aug_ctx = {"text": aug_ctx, "title": title}
+            new_negative_ctxs.append(aug_ctx)
+        negative_ctxs = new_negative_ctxs
+
+        new_hard_negative_ctxs = []
+        for ctx in hard_negative_ctxs:
+            passage_id = int(ctx["id"])
+            ctx, aug_ctx, title = self._boundary_aug(passage_id)
+            aug_ctx = {"text": aug_ctx, "title": title}
+            new_hard_negative_ctxs.append(aug_ctx)
+        hard_negative_ctxs = new_hard_negative_ctxs
+
+        # Make "extremely" hard negative contexts more likely to be chosen
+        to_add = 1 if len(hard_negative_ctxs) == 0 else len(hard_negative_ctxs)
+        hard_negative_ctxs.extend(extreme_hard_negative_ctxs * to_add)
+
+        for ctx in positive_ctxs + negative_ctxs + hard_negative_ctxs:
+            if "title" not in ctx:
+                ctx["title"] = None
+
+        def create_passage(ctx: dict):
+            return BiEncoderPassage(
+                normalize_passage(ctx["text"]) if self.normalize else ctx["text"],
+                ctx["title"],
+            )
+
+        r.positive_passages = [create_passage(ctx) for ctx in positive_ctxs]
+        r.negative_passages = [create_passage(ctx) for ctx in negative_ctxs]
+        r.hard_negative_passages = [create_passage(ctx) for ctx in hard_negative_ctxs]
+        return r
 
 def normalize_passage(ctx_text: str):
     ctx_text = ctx_text.replace("\n", " ").replace("’", "'")

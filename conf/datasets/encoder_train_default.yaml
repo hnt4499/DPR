@@ -8,21 +8,27 @@ nq_train_aug:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-train
   ctx_boundary_aug: 10
-  ctx_min_len: 50
+  ctx_min_len: 80
+
+nq_train_aug_2:
+  _target_: dpr.data.biencoder_data.JsonQADatasetWithAllPassages
+  file: /data/tuyen/openqa/DPR/notebooks/4_aug/data/nq-train-no-text.json
+  all_passages_file: /data/tuyen/openqa/DPR/notebooks/4_aug/data/psgs_w100_for_aug_processed.csv
+  ctx_boundary_aug: 10
 
 nq_train_cat:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-train
   sample_by_cat: true
-  sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled/nq-train-{}.json
+  sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled_puffer/nq-train-{}.json
 
 nq_train_aug_cat:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-train
   ctx_boundary_aug: 10
-  ctx_min_len: 50
+  ctx_min_len: 80
   sample_by_cat: true
-  sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled/nq-train-{}.json
+  sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled_puffer/nq-train-{}.json
 
 nq_train_hn1:
   _target_: dpr.data.biencoder_data.JsonQADataset
@@ -32,21 +38,27 @@ nq_train_hn1_aug:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-adv-hn-train
   ctx_boundary_aug: 10
-  ctx_min_len: 50
+  ctx_min_len: 80
+
+nq_train_hn1_aug_2:
+  _target_: dpr.data.biencoder_data.JsonQADatasetWithAllPassages
+  file: /data/tuyen/openqa/DPR/notebooks/4_aug/data/nq-adv-hn-train-no-text.json
+  all_passages_file: /data/tuyen/openqa/DPR/notebooks/4_aug/data/psgs_w100_for_aug_processed.csv
+  ctx_boundary_aug: 10
 
 nq_train_hn1_cat:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-adv-hn-train
   sample_by_cat: true
-  sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled/nq-adv-hn-train-{}.json
+  sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled_puffer/nq-adv-hn-train-{}.json
 
 nq_train_hn1_aug_cat:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-adv-hn-train
   ctx_boundary_aug: 10
-  ctx_min_len: 50
+  ctx_min_len: 80
   sample_by_cat: true
-  sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled/nq-adv-hn-train-{}.json
+  sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled_puffer/nq-adv-hn-train-{}.json
 
 nq_dev:
   _target_: dpr.data.biencoder_data.JsonQADataset

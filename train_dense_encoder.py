@@ -52,6 +52,8 @@ from dpr.utils.model_utils import (
     get_model_obj,
     load_states_from_checkpoint,
 )
+from dpr.data.biencoder_data import JsonQADatasetWithAllPassages
+
 
 logger = logging.getLogger()
 setup_logger(logger)
@@ -141,7 +143,11 @@ class BiEncoderTrainer(object):
         datasets_list = [ds for ds in hydra_datasets]
         rnd = random.Random(rank)
         rnd.shuffle(datasets_list)
-        [ds.load_data() for ds in datasets_list]
+
+        if isinstance(datasets_list[0], JsonQADatasetWithAllPassages):
+            [ds.load_data(datasets_list) for ds in datasets_list]
+        else:
+            [ds.load_data() for ds in datasets_list]
 
         sharded_iterator_initializers = [ShardedDataIteratorWithCategories if ds.sample_by_cat else ShardedDataIterator
                                          for ds in datasets_list]
