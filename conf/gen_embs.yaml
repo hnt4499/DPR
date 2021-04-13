@@ -4,6 +4,7 @@ defaults:
 
 # A trained bi-encoder checkpoint file to initialize the model
 model_file:
+ignore_pretrained_model_type: false
 
 # Name of the all-passages resource
 ctx_src:
@@ -24,7 +25,7 @@ shard_id: 0
 num_shards: 1
 
 # Batch size for the passage encoder forward pass (works in DataParallel mode)
-batch_size: 32
+batch_size: 1536
 
 tables_as_passages: False
 
