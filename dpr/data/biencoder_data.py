@@ -312,7 +312,7 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
         text, title = data[["text", "title"]]
 
         if self.ctx_boundary_aug <= 0:
-            if title in ["nan", "NaN"]:
+            if title in ["nan", "NaN"] or title is np.nan:
                 title = None
             return text, text, title
 
@@ -341,7 +341,7 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
             assert len(aug_text) == original_length, (text, " ".join(aug_text))
 
         aug_text = " ".join(aug_text)
-        if title in ["nan", "NaN"]:
+        if title in ["nan", "NaN"] or title is np.nan:
             title = None
 
         return text, aug_text, title
@@ -386,16 +386,30 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
         for ctx in negative_ctxs:
             passage_id = int(ctx["id"])
             ctx, aug_ctx, title = self._boundary_aug(passage_id)  # we assume that this does not result in positive passage
+            orig_ctx = {"text": ctx, "title": title}
             aug_ctx = {"text": aug_ctx, "title": title}
-            new_negative_ctxs.append(aug_ctx)
+
+            # Check if it results in another positive context
+            if any(answer.lower() in aug_ctx["text"].lower() for answer in answers):
+                positive_ctxs.append(aug_ctx)
+                new_negative_ctxs.append(orig_ctx)
+            else:
+                new_negative_ctxs.append(aug_ctx)
         negative_ctxs = new_negative_ctxs
 
         new_hard_negative_ctxs = []
         for ctx in hard_negative_ctxs:
             passage_id = int(ctx["id"])
             ctx, aug_ctx, title = self._boundary_aug(passage_id)
+            orig_ctx = {"text": ctx, "title": title}
             aug_ctx = {"text": aug_ctx, "title": title}
-            new_hard_negative_ctxs.append(aug_ctx)
+
+            # Check if it results in another positive context
+            if any(answer.lower() in aug_ctx["text"].lower() for answer in answers):
+                positive_ctxs.append(aug_ctx)
+                new_hard_negative_ctxs.append(orig_ctx)
+            else:
+                new_hard_negative_ctxs.append(aug_ctx)
         hard_negative_ctxs = new_hard_negative_ctxs
 
         # Make "extremely" hard negative contexts more likely to be chosen
