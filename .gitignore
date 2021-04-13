@@ -1,6 +1,7 @@
 # Data
 downloads/
 outputs/
+outputs_named/
 work_dirs/
 
 # Compile
