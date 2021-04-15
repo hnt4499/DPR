@@ -13,10 +13,10 @@ do_lower_case: True
 seed: 42
 
 # glob expression for train data files
-train_files:
+train_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single/train.json
 
 # glob expression for dev data files
-dev_files:
+dev_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single/dev.json
 
 # Total amount of positive and negative passages per question
 passages_per_question: 24
@@ -25,7 +25,7 @@ passages_per_question: 24
 passages_per_question_predict: 50
 
 # The output directory where the model checkpoints will be written to
-output_dir:
+output_dir: checkpoints/
 
 # Max amount of answer spans to marginalize per singe passage
 max_n_answers: 10
@@ -47,10 +47,10 @@ prediction_results_file:
 fully_resumable: False
 
 # File with the original train dataset passages (json format)
-gold_passages_src:
+gold_passages_src: /data/tuyen/openqa/DPR/downloads/data/gold_passages_info/nq_train.json
 
 # File with the original dataset passages (json format)
-gold_passages_src_dev:
+gold_passages_src_dev: /data/tuyen/openqa/DPR/downloads/data/gold_passages_info/nq_dev.json
 
 # num of threads to pre-process data.
 num_workers: 16
