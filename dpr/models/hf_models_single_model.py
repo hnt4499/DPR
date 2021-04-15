@@ -10,6 +10,7 @@ Encoder model wrappers based on HuggingFace code using only one model for
 encoding both question and context
 """
 
+from functools import partial
 import logging
 from typing import Tuple
 
@@ -40,7 +41,7 @@ def get_bert_biencoder_components(cfg, inference_only: bool = False, **kwargs):
 
     biencoder = BiEncoder(
         question_encoder, ctx_encoder, fix_ctx_encoder=fix_ctx_encoder
-    )
+    ).to(cfg.device)
 
     optimizer = (
         get_optimizer(
@@ -48,6 +49,7 @@ def get_bert_biencoder_components(cfg, inference_only: bool = False, **kwargs):
             learning_rate=cfg.train.learning_rate,
             adam_eps=cfg.train.adam_eps,
             weight_decay=cfg.train.weight_decay,
+            use_lamb=cfg.train.lamb,
         )
         if not inference_only
         else None
@@ -98,28 +100,31 @@ def get_optimizer(
     learning_rate: float = 1e-5,
     adam_eps: float = 1e-8,
     weight_decay: float = 0.0,
+    use_lamb: float = False,
 ) -> torch.optim.Optimizer:
     no_decay = ["bias", "LayerNorm.weight"]
 
-    optimizer_grouped_parameters = [
-        {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if not any(nd in n for nd in no_decay)
-            ],
-            "weight_decay": weight_decay,
-        },
-        {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if any(nd in n for nd in no_decay)
-            ],
-            "weight_decay": 0.0,
-        },
-    ]
-    optimizer = AdamW(optimizer_grouped_parameters, lr=learning_rate, eps=adam_eps)
+    with_decay = {"params": [], "weight_decay": weight_decay}
+    without_decay = {"params": [], "weight_decay": 0.0}
+    count = 0
+
+    for name, parameter in  model.named_parameters():
+        if (not any(nd in name for nd in no_decay)) and parameter.requires_grad:
+            with_decay["params"].append(parameter)
+            count += parameter.numel()
+        elif parameter.requires_grad:
+            without_decay["params"].append(parameter)
+            count += parameter.numel()
+
+    optimizer_grouped_parameters = [with_decay, without_decay]
+    if use_lamb:
+        from apex.optimizers.fused_lamb import FusedLAMB
+        optimizer_init = partial(FusedLAMB, adam_w_mode=True)
+    else:
+        optimizer_init = AdamW
+    optimizer = optimizer_init(optimizer_grouped_parameters, lr=learning_rate, eps=adam_eps)
+
+    logger.info(f"Initialized optimizer with {count} parameters: {optimizer}")
     return optimizer
 
 

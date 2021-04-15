@@ -11,6 +11,7 @@ encoding both question and context, with several layers on top of the encoder
 ; second stage: feed-forward, interactive matching)
 """
 
+from functools import partial
 import logging
 from typing import Tuple
 
@@ -49,6 +50,7 @@ def get_bert_biencoder_components(cfg, inference_only: bool = False, **kwargs):
             learning_rate=cfg.train.learning_rate,
             adam_eps=cfg.train.adam_eps,
             weight_decay=cfg.train.weight_decay,
+            use_lamb=cfg.train.lamb,
         )
         if not inference_only
         else None
@@ -99,6 +101,7 @@ def get_optimizer(
     learning_rate: float = 1e-5,
     adam_eps: float = 1e-8,
     weight_decay: float = 0.0,
+    use_lamb: float = False,
 ) -> torch.optim.Optimizer:
     no_decay = ["bias", "LayerNorm.weight"]
 
@@ -115,9 +118,14 @@ def get_optimizer(
             count += parameter.numel()
 
     optimizer_grouped_parameters = [with_decay, without_decay]
-    optimizer = AdamW(optimizer_grouped_parameters, lr=learning_rate, eps=adam_eps)
+    if use_lamb:
+        from apex.optimizers.fused_lamb import FusedLAMB
+        optimizer_init = partial(FusedLAMB, adam_w_mode=True)
+    else:
+        optimizer_init = AdamW
+    optimizer = optimizer_init(optimizer_grouped_parameters, lr=learning_rate, eps=adam_eps)
 
-    logger.info(f"Initialized optimizer with {count} parameters")
+    logger.info(f"Initialized optimizer with {count} parameters: {optimizer}")
     return optimizer
 
 
