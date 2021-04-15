@@ -290,8 +290,11 @@ class BiEncoderTrainer(object):
 
             # get the token to be used for representation selection
             ds_cfg = self.ds_cfg.dev_datasets[dataset]
-            rep_positions = ds_cfg.selector.get_positions(
-                biencoder_input.question_ids, self.tensorizer
+            rep_positions_q = ds_cfg.selector.get_positions(
+                biencoder_input.question_ids, self.tensorizer, self.biencoder
+            )
+            rep_positions_c = ds_cfg.selector.get_positions(
+                biencoder_input.context_ids, self.tensorizer, self.biencoder
             )
             encoder_type = ds_cfg.encoder_type
 
@@ -302,7 +305,8 @@ class BiEncoderTrainer(object):
                 self.loss_function,
                 cfg,
                 encoder_type=encoder_type,
-                rep_positions=rep_positions,
+                rep_positions_q=rep_positions_q,
+                rep_positions_c=rep_positions_c,
             )
             if cfg.others.is_matching:
                 loss, correct_cnt, correct_cnt_matching = outp
@@ -394,8 +398,11 @@ class BiEncoderTrainer(object):
             # get the token to be used for representation selection
             ds_cfg = self.ds_cfg.dev_datasets[dataset]
             encoder_type = ds_cfg.encoder_type
-            rep_positions = ds_cfg.selector.get_positions(
-                biencoder_input.question_ids, self.tensorizer
+            rep_positions_q = ds_cfg.selector.get_positions(
+                biencoder_input.question_ids, self.tensorizer, self.biencoder
+            )
+            rep_positions_c = ds_cfg.selector.get_positions(
+                biencoder_input.context_ids, self.tensorizer, self.biencoder
             )
 
             # split contexts batch into sub batches since it is supposed to be too large to be processed in one batch
@@ -429,7 +436,8 @@ class BiEncoderTrainer(object):
                         ctx_seg_batch,
                         ctx_attn_mask,
                         encoder_type=encoder_type,
-                        representation_token_pos=rep_positions,
+                        representation_token_pos_q=rep_positions_q,
+                        representation_token_pos_c=rep_positions_c,
                     )
 
                 if q_dense is not None:
@@ -594,8 +602,11 @@ class BiEncoderTrainer(object):
 
             selector = ds_cfg.selector if ds_cfg else DEFAULT_SELECTOR
 
-            rep_positions = selector.get_positions(
-                biencoder_batch.question_ids, self.tensorizer
+            rep_positions_q = selector.get_positions(
+                biencoder_batch.question_ids, self.tensorizer, self.biencoder
+            )
+            rep_positions_c = selector.get_positions(
+                biencoder_batch.context_ids, self.tensorizer, self.biencoder
             )
 
             loss_scale = (
@@ -608,7 +619,8 @@ class BiEncoderTrainer(object):
                 self.loss_function,
                 cfg,
                 encoder_type=encoder_type,
-                rep_positions=rep_positions,
+                rep_positions_q=rep_positions_q,
+                rep_positions_c=rep_positions_c,
                 loss_scale=loss_scale,
             )
             if cfg.others.is_matching:
@@ -923,7 +935,8 @@ def _do_biencoder_fwd_pass(
     loss_function,
     cfg,
     encoder_type: str,
-    rep_positions=0,
+    rep_positions_q=0,
+    rep_positions_c=0,
     loss_scale: float = None,
 ) -> Tuple[torch.Tensor, int]:
 
@@ -941,7 +954,8 @@ def _do_biencoder_fwd_pass(
             input.ctx_segments,
             ctx_attn_mask,
             encoder_type=encoder_type,
-            representation_token_pos=rep_positions,
+            representation_token_pos_q=rep_positions_q,
+            representation_token_pos_c=rep_positions_c,
         )
     else:
         with torch.no_grad():
@@ -953,7 +967,8 @@ def _do_biencoder_fwd_pass(
                 input.ctx_segments,
                 ctx_attn_mask,
                 encoder_type=encoder_type,
-                representation_token_pos=rep_positions,
+                representation_token_pos_q=rep_positions_q,
+                representation_token_pos_c=rep_positions_c,
             )
 
     local_q_vector, local_ctx_vectors = model_out

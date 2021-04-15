@@ -12,7 +12,7 @@ import pandas as pd
 import numpy as np
 import torch
 from omegaconf import DictConfig
-from torch import Tensor as T
+from torch import Tensor as T, dtype
 
 from dpr.data.tables import Table
 from dpr.utils.data_utils import read_data_from_json_files, Tensorizer
@@ -29,7 +29,7 @@ class BiEncoderSample(object):
 
 
 class RepTokenSelector(object):
-    def get_positions(self, input_ids: T, tenzorizer: Tensorizer):
+    def get_positions(self, input_ids: T, tenzorizer: Tensorizer, model: torch.nn.Module = None):
         raise NotImplementedError
 
 
@@ -37,7 +37,7 @@ class RepStaticPosTokenSelector(RepTokenSelector):
     def __init__(self, static_position: int = 0):
         self.static_position = static_position
 
-    def get_positions(self, input_ids: T, tenzorizer: Tensorizer):
+    def get_positions(self, input_ids: T, tenzorizer: Tensorizer, model: torch.nn.Module = None):
         return self.static_position
 
 
@@ -46,7 +46,7 @@ class RepSpecificTokenSelector(RepTokenSelector):
         self.token = token
         self.token_id = None
 
-    def get_positions(self, input_ids: T, tenzorizer: Tensorizer):
+    def get_positions(self, input_ids: T, tenzorizer: Tensorizer, model: torch.nn.Module = None):
         if not self.token_id:
             self.token_id = tenzorizer.get_token_id(self.token)
         token_indexes = (input_ids == self.token_id).nonzero()
@@ -75,6 +75,26 @@ class RepSpecificTokenSelector(RepTokenSelector):
         return token_indexes_result
 
 
+class RandomTokenSelector(RepTokenSelector):
+    def __init__(self, static_position: int = 0):
+        self.static_position = static_position  # in case during inference
+
+    def get_positions(self, input_ids: T, tenzorizer: Tensorizer, model: torch.nn.Module):
+        attention_masks = tenzorizer.get_attn_mask(input_ids)
+        rep_positions = []
+
+        for attention_mask in attention_masks:
+            if model.training:
+                input_length = (attention_mask != 0).sum()
+                rep_position = random.randint(0, input_length - 1)
+                rep_positions.append(rep_position)
+            else:
+                # Fall back to default
+                rep_positions.append(self.static_position)
+        rep_positions = torch.tensor(rep_positions, dtype=torch.int8).unsqueeze(-1).repeat(1, 2)
+        return rep_positions
+
+
 DEFAULT_SELECTOR = RepStaticPosTokenSelector()
 
 
@@ -88,6 +108,7 @@ class Dataset(torch.utils.data.Dataset):
         encoder_type: str = None,
     ):
         if selector:
+            logger.info(f"Initializing selector with config:\n{selector}")
             self.selector = hydra.utils.instantiate(selector)
         else:
             self.selector = DEFAULT_SELECTOR

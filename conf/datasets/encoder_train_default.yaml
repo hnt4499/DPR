@@ -30,6 +30,13 @@ nq_train_aug_cat:
   sample_by_cat: true
   sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled_puffer/nq-train-{}.json
 
+nq_train_rand_pos:
+  _target_: dpr.data.biencoder_data.JsonQADataset
+  file: data.retriever.nq-train
+  selector:
+    _target_: dpr.data.biencoder_data.RandomTokenSelector
+    static_position: 0
+
 nq_train_hn1:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-adv-hn-train
@@ -59,6 +66,13 @@ nq_train_hn1_aug_cat:
   ctx_min_len: 80
   sample_by_cat: true
   sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled_puffer/nq-adv-hn-train-{}.json
+
+nq_train_hn1_rand_pos:
+  _target_: dpr.data.biencoder_data.JsonQADataset
+  file: data.retriever.nq-adv-hn-train
+  selector:
+    _target_: dpr.data.biencoder_data.RandomTokenSelector
+    static_position: 0
 
 nq_dev:
   _target_: dpr.data.biencoder_data.JsonQADataset

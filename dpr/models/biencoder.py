@@ -119,7 +119,8 @@ class BiEncoder(nn.Module):
         ctx_segments: T,
         ctx_attn_mask: T,
         encoder_type: str = None,
-        representation_token_pos=0,
+        representation_token_pos_q=0,
+        representation_token_pos_c=0,
     ) -> Tuple[T, T]:
         q_encoder = (
             self.question_model
@@ -132,7 +133,7 @@ class BiEncoder(nn.Module):
             question_segments,
             question_attn_mask,
             self.fix_q_encoder,
-            representation_token_pos=representation_token_pos,
+            representation_token_pos=representation_token_pos_q,
         )
 
         ctx_encoder = (
@@ -141,7 +142,12 @@ class BiEncoder(nn.Module):
             else self.question_model
         )
         _ctx_seq, ctx_pooled_out, _ctx_hidden = self.get_representation(
-            ctx_encoder, context_ids, ctx_segments, ctx_attn_mask, self.fix_ctx_encoder
+            ctx_encoder,
+            context_ids,
+            ctx_segments,
+            ctx_attn_mask,
+            self.fix_ctx_encoder,
+            representation_token_pos=representation_token_pos_c,
         )
 
         return q_pooled_out, ctx_pooled_out

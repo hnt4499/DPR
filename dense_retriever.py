@@ -84,7 +84,7 @@ def generate_question_vectors(
             q_attn_mask = tensorizer.get_attn_mask(q_ids_batch)
 
             if selector:
-                rep_positions = selector.get_positions(q_ids_batch, tensorizer)
+                rep_positions = selector.get_positions(q_ids_batch, tensorizer, model=question_encoder)
 
                 _, out, _ = BiEncoder.get_representation(
                     question_encoder,
