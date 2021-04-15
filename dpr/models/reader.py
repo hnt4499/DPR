@@ -39,8 +39,10 @@ class Reader(nn.Module):
     def forward(self, input_ids: T, attention_mask: T, start_positions=None, end_positions=None, answer_mask=None):
         # notations: N - number of questions in a batch, M - number of passages per questions, L - sequence length
         N, M, L = input_ids.size()
-        start_logits, end_logits, relevance_logits = self._forward(input_ids.view(N * M, L),
-                                                                   attention_mask.view(N * M, L))
+        input_ids = input_ids.view(N * M, L)
+        attention_mask = attention_mask.view(N * M, L)
+
+        start_logits, end_logits, relevance_logits = self._forward(input_ids, attention_mask)
         if self.training:
             return compute_loss(start_positions, end_positions, answer_mask, start_logits, end_logits, relevance_logits,
                                 N, M)
