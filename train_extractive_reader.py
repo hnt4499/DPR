@@ -40,6 +40,7 @@ from dpr.options import (
     set_cfg_params_from_state,
     get_encoder_params_state_from_cfg,
     setup_logger,
+    get_gpu_info,
 )
 from dpr.utils.data_utils import (
     ShardedDataIterator,
@@ -594,6 +595,7 @@ def main(cfg: DictConfig):
 
     cfg = setup_cfg_gpu(cfg)
     set_seed(cfg)
+    get_gpu_info(rank=cfg.local_rank)  # for now only work with single-GPU and DDP mode
 
     if cfg.local_rank in [-1, 0]:
         logger.info("CFG (after gpu  configuration):")

@@ -113,3 +113,13 @@ def setup_logger(logger):
     console = logging.StreamHandler()
     console.setFormatter(log_formatter)
     logger.addHandler(console)
+
+
+def get_gpu_info(rank, index=0):
+    total_memory = torch.cuda.get_device_properties(index).total_memory
+    reserved = torch.cuda.memory_reserved(index)
+    available = (total_memory - reserved)
+    offset = (1024 ** 2)
+
+    logger.info(f"GPU Info: rank {rank}, total mem: {total_memory / offset:.1f} MB, reserved: {reserved / offset:.1f} "
+                f"MB, available: {available / offset:.1f} MB.")
