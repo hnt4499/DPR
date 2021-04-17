@@ -19,10 +19,10 @@ train_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single/t
 dev_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single/dev.json
 
 # Total amount of positive and negative passages per question
-passages_per_question: 24
+passages_per_question: 8
 
 # Total amount of positive and negative passages per question for evaluation
-passages_per_question_predict: 50
+passages_per_question_predict: 60
 
 # The output directory where the model checkpoints will be written to
 output_dir: checkpoints/
