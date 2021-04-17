@@ -13,6 +13,7 @@
 import collections
 import json
 import sys
+import yaml
 
 import hydra
 import logging
@@ -600,6 +601,10 @@ def main(cfg: DictConfig):
     if cfg.local_rank in [-1, 0]:
         logger.info("CFG (after gpu  configuration):")
         logger.info("%s", OmegaConf.to_yaml(cfg))
+
+        # Save config
+        with open("config.yaml", "w") as fout:
+            yaml.dump(eval(str(cfg)), fout)
 
     trainer = ReaderTrainer(cfg)
 

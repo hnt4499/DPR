@@ -68,10 +68,6 @@ class BiEncoderTrainer(object):
     """
 
     def __init__(self, cfg: DictConfig):
-        # Save config
-        if cfg.local_rank in [-1, 0]:
-            with open("config.yaml", "w") as fout:
-                yaml.dump(eval(str(cfg)), fout)
 
         self.shard_id = cfg.local_rank if cfg.local_rank != -1 else 0
         self.distributed_factor = cfg.distributed_world_size or 1
@@ -1027,6 +1023,10 @@ def main(cfg: DictConfig):
     if cfg.local_rank in [-1, 0]:
         logger.info("CFG (after gpu  configuration):")
         logger.info("%s", OmegaConf.to_yaml(cfg))
+        
+        # Save config
+        with open("config.yaml", "w") as fout:
+            yaml.dump(eval(str(cfg)), fout)
 
     trainer = BiEncoderTrainer(cfg)
 
