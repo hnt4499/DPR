@@ -20,7 +20,7 @@ from torch import Tensor as T
 from torch.nn import CrossEntropyLoss
 
 from dpr.data.reader_data import ReaderSample, ReaderPassage
-from dpr.utils.model_utils import init_weights
+from dpr.utils.model_utils import init_weights, CheckpointState, load_state_dict_to_model
 
 logger = logging.getLogger()
 
@@ -58,16 +58,19 @@ class Reader(nn.Module):
         end_logits = end_logits.squeeze(-1)
         rank_logits = self.qa_classifier(sequence_output[:, 0, :])
         return start_logits, end_logits, rank_logits
+    
+    def load_state(self, saved_state: CheckpointState):
+        load_state_dict_to_model(self, saved_state.model_dict)
 
 
-class InterPassageReader(nn.Module):
+class InterPassageReader(Reader):
     def __init__(
         self,
         encoder: nn.Module,
         inter_passage_encoder: nn.Module,
         hidden_size: int = None,  # for backward compatibility
     ):
-        super(InterPassageReader, self).__init__()
+        super(Reader, self).__init__()
 
         self.config = encoder.config
         self.encoder = encoder

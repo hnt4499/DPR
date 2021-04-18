@@ -435,7 +435,7 @@ class ReaderTrainer(object):
         model_to_load = get_model_obj(self.reader)
         if saved_state.model_dict:
             logger.info("Loading model weights from saved state ...")
-            model_to_load.load_state_dict(saved_state.model_dict)
+            model_to_load.load_state(saved_state)
 
         logger.info("Loading saved optimizer state ...")
         if saved_state.optimizer_dict:

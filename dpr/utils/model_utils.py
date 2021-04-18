@@ -172,3 +172,30 @@ def load_states_from_checkpoint(model_file: str) -> CheckpointState:
     )
     logger.info("model_state_dict keys %s", state_dict.keys())
     return CheckpointState(**state_dict)
+
+
+def load_state_dict_to_model(model: nn.Module, state_dict: collections.OrderedDict):
+    model_keys = set(model.state_dict().keys())
+    pretrained_model_keys = set(state_dict.keys())
+
+    # Check validity
+    keys_redundant = pretrained_model_keys - model_keys
+    if len(keys_redundant) > 0:
+        logger.warn(f"Redundant keys detected in the pre-trained state dict: {list(keys_redundant)}.")
+
+    keys_missing = model_keys - pretrained_model_keys
+    if len(keys_missing) > 0:
+        logger.warn(f"Missing keys detected in the pretrained state dict: {list(keys_missing)}.")
+
+    # Remove redundant params
+    for key_redundant in keys_redundant:
+        del state_dict[key_redundant]
+
+    # Get parameters count
+    param_count = 0
+    for _, param in state_dict.items():
+        param_count += param.numel()
+    logger.info(f"Loading {param_count} parameters to the model...")
+
+    # Load
+    model.load_state_dict(state_dict, strict=False)

@@ -22,7 +22,7 @@ from torch import nn
 
 from dpr.data.biencoder_data import BiEncoderSample
 from dpr.utils.data_utils import Tensorizer
-from dpr.utils.model_utils import CheckpointState
+from dpr.utils.model_utils import CheckpointState, load_state_dict_to_model
 
 logger = logging.getLogger(__name__)
 
@@ -362,14 +362,8 @@ class BiEncoder(nn.Module):
             del saved_state.model_dict["question_model.embeddings.position_ids"]
             del saved_state.model_dict["ctx_model.embeddings.position_ids"]
 
-        # Calculate number of parameters
-        count = 0
-        for name, weight in saved_state.model_dict.items():
-            count += weight.numel()
-        logger.info(f"Loading {count} parameters...")
-
-        # TODO: remove this workaround
-        self.load_state_dict(saved_state.model_dict, strict=False)
+        # Load
+        load_state_dict_to_model(self, saved_state.model_dict)
 
     def get_state_dict(self):
         return self.state_dict()
