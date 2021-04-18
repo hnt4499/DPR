@@ -96,9 +96,17 @@ def init_hf_bert_inter_passage_reader(args, **kwargs):
     return get_bert_reader_components(args, **kwargs)
 
 
+def init_hf_bert_inter_passage_reader_from_retriever(args, **kwargs):
+    if importlib.util.find_spec("transformers") is None:
+        raise RuntimeError('Please install transformers lib')
+    from .hf_models_inter_passage_from_retriever import get_bert_reader_components
+    return get_bert_reader_components(args, **kwargs)
+
+
 READER_INITIALIZERS = {
     'hf_bert': init_hf_bert_reader,
     'hf_bert_inter_passage': init_hf_bert_inter_passage_reader,
+    'hf_bert_inter_passage_from_retriever': init_hf_bert_inter_passage_reader_from_retriever,
 }
 
 

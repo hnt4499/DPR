@@ -174,7 +174,7 @@ def load_states_from_checkpoint(model_file: str) -> CheckpointState:
     return CheckpointState(**state_dict)
 
 
-def load_state_dict_to_model(model: nn.Module, state_dict: collections.OrderedDict):
+def load_state_dict_to_model(model: nn.Module, state_dict: dict):
     model_keys = set(model.state_dict().keys())
     pretrained_model_keys = set(state_dict.keys())
 
@@ -190,6 +190,9 @@ def load_state_dict_to_model(model: nn.Module, state_dict: collections.OrderedDi
     # Remove redundant params
     for key_redundant in keys_redundant:
         del state_dict[key_redundant]
+    
+    if len(state_dict) == 0:
+        raise ValueError("No weight to load.")
 
     # Get parameters count
     param_count = 0

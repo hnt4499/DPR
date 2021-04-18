@@ -23,6 +23,7 @@ from transformers.tokenization_roberta import RobertaTokenizer
 
 from dpr.models.biencoder import BiEncoder
 from dpr.utils.data_utils import Tensorizer
+from dpr.utils.model_utils import load_state_dict_to_model
 from .reader import Reader
 
 logger = logging.getLogger(__name__)
@@ -261,6 +262,9 @@ class HFBertEncoder(BertModel):
         if self.encode_proj:
             return self.encode_proj.out_features
         return self.config.hidden_size
+    
+    def load_state(self, state_dict: dict):
+        load_state_dict_to_model(self, state_dict)
 
 
 class BertTensorizer(Tensorizer):
