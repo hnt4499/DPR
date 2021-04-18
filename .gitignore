@@ -2,6 +2,7 @@
 downloads/
 outputs/
 outputs_named/
+outputs_named_reader/
 work_dirs/
 
 # Compile
