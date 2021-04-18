@@ -60,6 +60,62 @@ class Reader(nn.Module):
         return start_logits, end_logits, rank_logits
 
 
+class InterPassageReader(nn.Module):
+    def __init__(
+        self,
+        encoder: nn.Module,
+        inter_passage_encoder: nn.Module,
+        hidden_size: int = None,  # for backward compatibility
+    ):
+        super(InterPassageReader, self).__init__()
+
+        self.config = encoder.config
+        self.encoder = encoder
+        self.qa_outputs = nn.Linear(self.config.hidden_size, 2)
+
+        self.inter_passage_config = inter_passage_encoder.config
+        self.inter_passage_encoder = inter_passage_encoder.encoder  # we don't need embedding layer, etc.
+        self.score_layer = nn.Linear(self.inter_passage_config.hidden_size, 1)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, input_ids: T, attention_mask: T, start_positions=None, end_positions=None, answer_mask=None):
+        # notations: N - number of questions in a batch, M - number of passages per questions, L - sequence length
+        N, M, L = input_ids.size()
+        input_ids = input_ids.view(N * M, L)
+        attention_mask = attention_mask.view(N * M, L)
+
+        start_logits, end_logits, relevance_logits = self._forward(input_ids, attention_mask, N, M)
+        if self.training:
+            return compute_loss(start_positions, end_positions, answer_mask, start_logits, end_logits, relevance_logits,
+                                N, M)
+        
+        return start_logits.view(N, M, L), end_logits.view(N, M, L), relevance_logits.view(N, M)
+
+    def _forward(self, input_ids, attention_mask, N, M):
+        # input_ids: (N * M, L); N: number of questions in a batch, M: number of passages per questions, L: sequence length
+
+        sequence_output = self.encoder(input_ids, None, attention_mask)[0]  # (N * M, L, H)
+        cls_output = sequence_output[:, 0, :].view(N, M, -1)  # [CLS] token, (N, M, H)
+
+        # Inter-passage interaction
+        head_mask = [None] * self.inter_passage_config.num_hidden_layers  # get HF head mask
+        passage_scores = self.score_layer(self.inter_passage_encoder(
+            cls_output, head_mask=head_mask)[0]).squeeze(-1)  # (N, M)
+        passage_scores = self.softmax(passage_scores).view(-1, 1)  # (N * M, 1)
+
+        # Get start and end predictions
+        logits = self.qa_outputs(sequence_output)  # (N * M, L, 2)
+        start_logits, end_logits = logits.split(1, dim=-1)
+        start_logits = start_logits.squeeze(-1)  # (N * M, L)
+        end_logits = end_logits.squeeze(-1)  # (N * M, L)
+
+        # Use inter-passage score to re-weight predictions
+        start_logits = start_logits * passage_scores  # (N * M, L)
+        end_logits = end_logits * passage_scores  # (N * M, L)
+
+        return start_logits, end_logits, passage_scores
+
+
 def compute_loss(start_positions, end_positions, answer_mask, start_logits, end_logits, relevance_logits, N, M):
     start_positions = start_positions.view(N * M, -1)
     end_positions = end_positions.view(N * M, -1)
