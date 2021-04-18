@@ -95,6 +95,7 @@ class ReaderTrainer(object):
         self.reader = reader
         self.optimizer = optimizer
         self.tensorizer = tensorizer
+        self.dev_iterator = None
         self.start_epoch = 0
         self.start_batch = 0
         self.scheduler_state = None
@@ -227,15 +228,16 @@ class ReaderTrainer(object):
         logger.info("Validation ...")
         cfg = self.cfg
         self.reader.eval()
-        data_iterator = self.get_data_iterator(
-            cfg.dev_files, cfg.train.dev_batch_size, False, shuffle=False
-        )
+        if self.dev_iterator is None:
+            self.dev_iterator = self.get_data_iterator(
+                cfg.dev_files, cfg.train.dev_batch_size, False, shuffle=False
+            )
 
         log_result_step = cfg.train.log_batch_step
         all_results = []
 
         eval_top_docs = cfg.eval_top_docs
-        for i, samples_batch in enumerate(data_iterator.iterate_ds_data()):
+        for i, samples_batch in enumerate(self.dev_iterator.iterate_ds_data()):
             input = create_reader_input(
                 self.tensorizer.get_pad_id(),
                 samples_batch,
