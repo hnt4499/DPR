@@ -104,17 +104,13 @@ class InterPassageReader(Reader):
         head_mask = [None] * self.inter_passage_config.num_hidden_layers  # get HF head mask
         passage_scores = self.score_layer(self.inter_passage_encoder(
             cls_output, head_mask=head_mask)[0]).squeeze(-1)  # (N, M)
-        passage_scores = self.softmax(passage_scores).view(-1, 1)  # (N * M, 1)
+        passage_scores = passage_scores.view(-1, 1)  # (N * M, 1)
 
         # Get start and end predictions
         logits = self.qa_outputs(sequence_output)  # (N * M, L, 2)
         start_logits, end_logits = logits.split(1, dim=-1)
         start_logits = start_logits.squeeze(-1)  # (N * M, L)
         end_logits = end_logits.squeeze(-1)  # (N * M, L)
-
-        # Use inter-passage score to re-weight predictions
-        start_logits = start_logits * passage_scores  # (N * M, L)
-        end_logits = end_logits * passage_scores  # (N * M, L)
 
         return start_logits, end_logits, passage_scores
 
