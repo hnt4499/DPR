@@ -16,7 +16,7 @@ pretrained_file:
 pretrained_encoder_file: /data/tuyen/openqa/DPR/outputs_named/3_single_model/checkpoints/dpr_biencoder.31
 encoder_initialize_from: question_encoder  # one of [question_encoder, ctx_encoder]
 encoder_freeze: False  # whether to freeze the main encoder
-encoder_learning_rate: 1e-6  # overwrite the default learning rate for the main encoder
+encoder_learning_rate: 3e-6  # overwrite the default learning rate for the main encoder
 allow_embedding_size_mismatch: True  # whether to truncate the pretrained embeddings to match the encoder embeddings
 
 # Extra linear layer on top of standard bert/roberta encoder

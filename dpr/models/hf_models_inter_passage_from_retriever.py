@@ -61,6 +61,8 @@ def get_bert_reader_components(cfg, inference_only: bool = False, **kwargs):
                 model_embeddings = model_embeddings[0]
 
                 assert len(param) >= len(model_embeddings)
+                logger.info(f"Truncating pretrained embedding size from {len(param)} to {len(model_embeddings)} "
+                            f"by simply selecting the first {len(model_embeddings)} embeddings.")
                 param = param[:len(model_embeddings)]
             
             new_saved_state[key] = param

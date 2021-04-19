@@ -6,8 +6,8 @@ encoder_model_type: hf_bert_inter_passage
 # HuggingFace's config name for model initialization
 pretrained_model_cfg: bert-base-uncased
 
-# Number of layers for each of the components; usually their sum is 12
-num_layers: [10, 2]
+# Number of layers for each of the components; usually their sum is 12, or the first encoder has 12 layers
+num_layers: [12, 2]
 
 # Some encoders need to be initialized from a file
 pretrained_file:
