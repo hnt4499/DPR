@@ -23,10 +23,11 @@ import torch
 
 from collections import defaultdict
 from omegaconf import DictConfig, OmegaConf
-from typing import List
+from typing import List, Tuple
 
 
 from dpr.data.qa_validation import exact_match_score, f1_score
+from dpr.utils.dist_utils import all_gather_list
 from dpr.data.reader_data import (
     ReaderSample,
     get_best_spans,
@@ -223,6 +224,31 @@ class ReaderTrainer(object):
                 self.best_validation_result = reader_validation_score
                 self.best_cp_name = cp_name
                 logger.info("New Best validation checkpoint %s", cp_name)
+    
+    def _gather(self, objects_to_sync: List[object]) -> List[Tuple]:
+        """Helper function to gather all needed data."""
+        cfg = self.cfg
+        distributed_world_size = cfg.distributed_world_size or 1
+        
+        if distributed_world_size > 1:
+            global_objects_to_sync = all_gather_list(
+                objects_to_sync,
+                max_size=cfg.global_loss_buf_sz,
+            )
+
+            gathered_objects = []
+
+            for i, item in enumerate(global_objects_to_sync):
+                if i != cfg.local_rank:
+                    gathered_objects.append(item)
+                else:
+                    gathered_objects.append(objects_to_sync)
+
+        else:
+            gathered_objects = [objects_to_sync]
+        
+        gathered_objects = list(zip(*gathered_objects))
+        return gathered_objects
 
     def validate(self):
         logger.info("Validation ...")
@@ -268,6 +294,9 @@ class ReaderTrainer(object):
 
             if (i + 1) % log_result_step == 0:
                 logger.info("Eval step: %d ", i)
+            
+            if i == 50:
+                break
 
         ems = defaultdict(list)
         f1s = defaultdict(list)
@@ -296,13 +325,18 @@ class ReaderTrainer(object):
                 )
                 f1s[n].append(f1_hit)
         
+        # Sync between GPUs
+        ems, f1s = self._gather([ems, f1s])
+        
         em = 0
-        for n in sorted(ems.keys()):
-            em = np.mean(ems[n])
+        for n in sorted(ems[0].keys()):
+            ems_n = sum([em[n] for em in ems], [])  # gather and concatenate
+            em = np.mean(ems_n)
             logger.info("n=%d\tEM %.2f" % (n, em * 100))
         
-        for n in sorted(f1s.keys()):
-            f1 = np.mean(f1s[n])
+        for n in sorted(f1s[0].keys()):
+            f1s_n = sum([f1[n] for f1 in f1s], [])  # gather and concatenate
+            f1 = np.mean(f1s_n)
             logger.info("n=%d\tF1 %.2f" % (n, f1 * 100))
 
         if cfg.prediction_results_file:
