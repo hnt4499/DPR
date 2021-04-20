@@ -34,7 +34,7 @@ max_n_answers: 10
 # and end predictions are not conditioned on one another
 max_answer_length: 10
 
-# Top retrieval passages thresholds to analyze prediction results for
+# Top **retrieval** passages thresholds to analyze prediction results for; this should be equal to `passages_per_question_predict`
 eval_top_docs:
   - 50
 

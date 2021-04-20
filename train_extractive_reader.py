@@ -26,7 +26,7 @@ from omegaconf import DictConfig, OmegaConf
 from typing import List
 
 
-from dpr.data.qa_validation import exact_match_score
+from dpr.data.qa_validation import exact_match_score, f1_score
 from dpr.data.reader_data import (
     ReaderSample,
     get_best_spans,
@@ -233,7 +233,7 @@ class ReaderTrainer(object):
                 cfg.dev_files, cfg.train.dev_batch_size, False, shuffle=False
             )
 
-        log_result_step = cfg.train.log_batch_step
+        log_result_step = cfg.train.log_batch_step // 4  # validation needs to be more verbose
         all_results = []
 
         eval_top_docs = cfg.eval_top_docs
@@ -270,6 +270,7 @@ class ReaderTrainer(object):
                 logger.info("Eval step: %d ", i)
 
         ems = defaultdict(list)
+        f1s = defaultdict(list)
 
         for q_predictions in all_results:
             gold_answers = q_predictions.gold_answers
@@ -277,6 +278,7 @@ class ReaderTrainer(object):
                 q_predictions.predictions
             )  # {top docs threshold -> SpanPrediction()}
             for (n, span_prediction) in span_predictions.items():
+                # Exact match
                 em_hit = max(
                     [
                         exact_match_score(span_prediction.prediction_text, ga)
@@ -284,10 +286,24 @@ class ReaderTrainer(object):
                     ]
                 )
                 ems[n].append(em_hit)
+
+                # F1 score
+                f1_hit = max(
+                    [
+                        f1_score(span_prediction.prediction_text, ga)
+                        for ga in gold_answers
+                    ]
+                )
+                f1s[n].append(f1_hit)
+        
         em = 0
         for n in sorted(ems.keys()):
             em = np.mean(ems[n])
             logger.info("n=%d\tEM %.2f" % (n, em * 100))
+        
+        for n in sorted(f1s.keys()):
+            f1 = np.mean(f1s[n])
+            logger.info("n=%d\tF1 %.2f" % (n, f1 * 100))
 
         if cfg.prediction_results_file:
             self._save_predictions(cfg.prediction_results_file, all_results)
