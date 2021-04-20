@@ -180,6 +180,88 @@ class ExtractiveReaderDataset(torch.utils.data.Dataset):
         return serialized_files
 
 
+def convert_retriever_results(
+    is_train_set: bool,
+    input_file: str,
+    out_file_prefix: str,
+    gold_passages_file: str,
+    tensorizer: Tensorizer,
+    num_workers: int = 8,
+) -> List[str]:
+    """
+    Converts the file with dense retriever(or any compatible file format) results into the reader input data and
+    serializes them into a set of files.
+    Conversion splits the input data into multiple chunks and processes them in parallel. Each chunk results are stored
+    in a separate file with name out_file_prefix.{number}.pkl
+    :param is_train_set: if the data should be processed for a train set (i.e. with answer span detection)
+    :param input_file: path to a json file with data to convert
+    :param out_file_prefix: output path prefix.
+    :param gold_passages_file: optional path for the 'gold passages & questions' file. Required to get best results for NQ
+    :param tensorizer: Tensorizer object for text to model input tensors conversions
+    :param num_workers: the number of parallel processes for conversion
+    :return: names of files with serialized results
+    """
+    with open(input_file, "r", encoding="utf-8") as f:
+        samples = json.loads("".join(f.readlines()))
+    logger.info(
+        "Loaded %d questions + retrieval results from %s", len(samples), input_file
+    )
+    workers = multiprocessing.Pool(num_workers)
+    ds_size = len(samples)
+    step = max(math.ceil(ds_size / num_workers), 1)
+    chunks = [samples[i : i + step] for i in range(0, ds_size, step)]
+    chunks = [(i, chunks[i]) for i in range(len(chunks))]
+
+    logger.info("Split data into %d chunks", len(chunks))
+
+    processed = 0
+    _parse_batch = partial(
+        _preprocess_reader_samples_chunk,
+        out_file_prefix=out_file_prefix,
+        gold_passages_file=gold_passages_file,
+        tensorizer=tensorizer,
+        is_train_set=is_train_set,
+    )
+    serialized_files = []
+    for file_name in workers.map(_parse_batch, chunks):
+        processed += 1
+        serialized_files.append(file_name)
+        logger.info("Chunks processed %d", processed)
+        logger.info("Data saved to %s", file_name)
+    logger.info("Preprocessed data stored in %s", serialized_files)
+    return serialized_files
+
+
+def _preprocess_reader_samples_chunk(
+    samples: List,
+    out_file_prefix: str,
+    gold_passages_file: str,
+    tensorizer: Tensorizer,
+    is_train_set: bool,
+) -> str:
+    chunk_id, samples = samples
+    logger.info("Start batch %d", len(samples))
+    iterator = preprocess_retriever_data(
+        samples,
+        gold_passages_file,
+        tensorizer,
+        is_train_set=is_train_set,
+    )
+
+    results = []
+
+    iterator = tqdm(iterator)
+    for i, r in enumerate(iterator):
+        r.on_serialize()
+        results.append(r)
+
+    out_file = out_file_prefix + "." + str(chunk_id) + ".pkl"
+    with open(out_file, mode="wb") as f:
+        logger.info("Serialize %d results to %s", len(results), out_file)
+        pickle.dump(results, f)
+    return out_file
+
+
 SpanPrediction = collections.namedtuple(
     "SpanPrediction",
     [
@@ -316,58 +398,6 @@ def preprocess_retriever_data(
 
     logger.info("no positive passages samples: %d", no_positive_passages)
     logger.info("positive passages from gold samples: %d", positives_from_gold)
-
-
-def convert_retriever_results(
-    is_train_set: bool,
-    input_file: str,
-    out_file_prefix: str,
-    gold_passages_file: str,
-    tensorizer: Tensorizer,
-    num_workers: int = 8,
-) -> List[str]:
-    """
-    Converts the file with dense retriever(or any compatible file format) results into the reader input data and
-    serializes them into a set of files.
-    Conversion splits the input data into multiple chunks and processes them in parallel. Each chunk results are stored
-    in a separate file with name out_file_prefix.{number}.pkl
-    :param is_train_set: if the data should be processed for a train set (i.e. with answer span detection)
-    :param input_file: path to a json file with data to convert
-    :param out_file_prefix: output path prefix.
-    :param gold_passages_file: optional path for the 'gold passages & questions' file. Required to get best results for NQ
-    :param tensorizer: Tensorizer object for text to model input tensors conversions
-    :param num_workers: the number of parallel processes for conversion
-    :return: names of files with serialized results
-    """
-    with open(input_file, "r", encoding="utf-8") as f:
-        samples = json.loads("".join(f.readlines()))
-    logger.info(
-        "Loaded %d questions + retrieval results from %s", len(samples), input_file
-    )
-    workers = multiprocessing.Pool(num_workers)
-    ds_size = len(samples)
-    step = max(math.ceil(ds_size / num_workers), 1)
-    chunks = [samples[i : i + step] for i in range(0, ds_size, step)]
-    chunks = [(i, chunks[i]) for i in range(len(chunks))]
-
-    logger.info("Split data into %d chunks", len(chunks))
-
-    processed = 0
-    _parse_batch = partial(
-        _preprocess_reader_samples_chunk,
-        out_file_prefix=out_file_prefix,
-        gold_passages_file=gold_passages_file,
-        tensorizer=tensorizer,
-        is_train_set=is_train_set,
-    )
-    serialized_files = []
-    for file_name in workers.map(_parse_batch, chunks):
-        processed += 1
-        serialized_files.append(file_name)
-        logger.info("Chunks processed %d", processed)
-        logger.info("Data saved to %s", file_name)
-    logger.info("Preprocessed data stored in %s", serialized_files)
-    return serialized_files
 
 
 def get_best_spans(
@@ -614,33 +644,3 @@ def _extend_span_to_full_words(
         end_index += 1
 
     return start_index, end_index
-
-
-def _preprocess_reader_samples_chunk(
-    samples: List,
-    out_file_prefix: str,
-    gold_passages_file: str,
-    tensorizer: Tensorizer,
-    is_train_set: bool,
-) -> str:
-    chunk_id, samples = samples
-    logger.info("Start batch %d", len(samples))
-    iterator = preprocess_retriever_data(
-        samples,
-        gold_passages_file,
-        tensorizer,
-        is_train_set=is_train_set,
-    )
-
-    results = []
-
-    iterator = tqdm(iterator)
-    for i, r in enumerate(iterator):
-        r.on_serialize()
-        results.append(r)
-
-    out_file = out_file_prefix + "." + str(chunk_id) + ".pkl"
-    with open(out_file, mode="wb") as f:
-        logger.info("Serialize %d results to %s", len(results), out_file)
-        pickle.dump(results, f)
-    return out_file
