@@ -220,10 +220,11 @@ class ReaderTrainer(object):
             cp_name = self._save_checkpoint(scheduler, epoch, iteration)
             logger.info("Saved checkpoint to %s", cp_name)
 
-            if reader_validation_score < (self.best_validation_result or 0):
+            if reader_validation_score > (self.best_validation_result or 0):
                 self.best_validation_result = reader_validation_score
                 self.best_cp_name = cp_name
-                logger.info("New Best validation checkpoint %s", cp_name)
+                logger.info(f"New Best validation checkpoint {cp_name} with validation score "
+                            f"{reader_validation_score:.2f}")
     
     def _gather(self, objects_to_sync: List[object]) -> List[Tuple]:
         """Helper function to gather all needed data."""
