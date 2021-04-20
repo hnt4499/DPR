@@ -294,9 +294,6 @@ class ReaderTrainer(object):
 
             if (i + 1) % log_result_step == 0:
                 logger.info("Eval step: %d ", i)
-            
-            if i == 50:
-                break
 
         ems = defaultdict(list)
         f1s = defaultdict(list)
