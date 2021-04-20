@@ -20,7 +20,6 @@ from functools import partial
 from typing import Tuple, List, Dict
 
 import nltk
-nltk.download('punkt')
 
 
 from dpr.data.retriever_data import TableChunk
@@ -152,6 +151,7 @@ def exact_match_score(prediction, ground_truth):
 
 
 def f1_score(prediction, ground_truth, eps=1e-8):
+    nltk.download('punkt')
     # Normalize and tokenize
     prediction = nltk.tokenize.word_tokenize(_normalize_answer(prediction))
     ground_truth = nltk.tokenize.word_tokenize(_normalize_answer(ground_truth))
