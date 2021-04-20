@@ -44,7 +44,7 @@ checkpoint_file_name: dpr_extractive_reader
 prediction_results_file:
 
 # Enables fully resumable mode
-fully_resumable: False
+fully_resumable: True
 
 # File with the original train dataset passages (json format)
 gold_passages_src: /data/tuyen/openqa/DPR/downloads/data/gold_passages_info/nq_train.json
