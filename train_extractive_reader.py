@@ -20,6 +20,7 @@ import logging
 import numpy as np
 import os
 import torch
+torch.autograd.set_detect_anomaly(True)
 
 from collections import defaultdict
 from omegaconf import DictConfig, OmegaConf
@@ -581,6 +582,7 @@ class ReaderTrainer(object):
                 input.start_positions,
                 input.end_positions,
                 input.answers_mask,
+                use_simple_loss=getattr(cfg.train, "use_simple_loss", False),
             )
 
         else:
@@ -599,6 +601,7 @@ class ReaderTrainer(object):
                 rank_logits,
                 questions_num,
                 passages_per_question,
+                use_simple_loss=getattr(cfg.train, "use_simple_loss", False),
             )
         if cfg.n_gpu > 1:
             loss = loss.mean()

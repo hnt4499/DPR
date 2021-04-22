@@ -79,9 +79,9 @@ class InterPassageReader(Reader):
         self.inter_passage_config = inter_passage_encoder.config
         self.inter_passage_encoder = inter_passage_encoder.encoder  # we don't need embedding layer, etc.
         self.score_layer = nn.Linear(self.inter_passage_config.hidden_size, 1)
-        self.softmax = nn.Softmax(dim=-1)
 
-    def forward(self, input_ids: T, attention_mask: T, start_positions=None, end_positions=None, answer_mask=None):
+    def forward(self, input_ids: T, attention_mask: T, start_positions=None, end_positions=None, answer_mask=None, 
+                use_simple_loss=False):
         # notations: N - number of questions in a batch, M - number of passages per questions, L - sequence length
         N, M, L = input_ids.size()
         input_ids = input_ids.view(N * M, L)
@@ -90,7 +90,7 @@ class InterPassageReader(Reader):
         start_logits, end_logits, relevance_logits = self._forward(input_ids, attention_mask, N, M)
         if self.training:
             return compute_loss(start_positions, end_positions, answer_mask, start_logits, end_logits, relevance_logits,
-                                N, M)
+                                N, M, use_simple_loss=use_simple_loss)
         
         return start_logits.view(N, M, L), end_logits.view(N, M, L), relevance_logits.view(N, M)
 
@@ -115,40 +115,98 @@ class InterPassageReader(Reader):
         return start_logits, end_logits, passage_scores
 
 
-def compute_loss(start_positions, end_positions, answer_mask, start_logits, end_logits, relevance_logits, N, M):
-    start_positions = start_positions.view(N * M, -1)
-    end_positions = end_positions.view(N * M, -1)
-    answer_mask = answer_mask.view(N * M, -1)
+class InterPassageReaderV2(InterPassageReader):
+    def __init__(
+        self,
+        encoder: nn.Module,
+        inter_passage_encoder: nn.Module,
+        bottleneck_size: int = 16,
+        hidden_size: int = None,  # for backward compatibility
+    ):
+        super(Reader, self).__init__()
 
-    start_logits = start_logits.view(N * M, -1)
-    end_logits = end_logits.view(N * M, -1)
-    relevance_logits = relevance_logits.view(N * M)
+        self.config = encoder.config
+        self.encoder = encoder
 
-    answer_mask = answer_mask.type(torch.FloatTensor).cuda()
+        self.inter_passage_config = inter_passage_encoder.config
+        self.inter_passage_encoder = inter_passage_encoder.encoder  # we don't need embedding layer, etc.
 
-    ignored_index = start_logits.size(1)
+        # Output layers
+        self.bottleneck_size = bottleneck_size
+        self.bottleneck = nn.Linear(self.config.hidden_size, bottleneck_size)
+        self.qa_outputs = nn.Linear(bottleneck_size + 1, 2)
+
+    def _forward(self, input_ids, attention_mask, N, M):
+        # input_ids: (N * M, L); N: number of questions in a batch, M: number of passages per questions, L: sequence length
+
+        sequence_output = self.encoder(input_ids, None, attention_mask)[0]  # (N * M, L, H)
+        cls_output = sequence_output[:, 0, :].view(N, M, -1)  # [CLS] token, (N, M, H)
+
+        # Inter-passage interaction
+        head_mask = [None] * self.inter_passage_config.num_hidden_layers  # get HF head mask
+        passage_scores = self.inter_passage_encoder(cls_output, head_mask=head_mask)[0]  # (N, M, H)
+        passage_scores = passage_scores.transpose(1, 2)  # (N, H, M)
+
+        # Model the interaction between each word in each passage and every passage in the batch
+        _, L, H = sequence_output.size()
+        passage_scores = torch.matmul(sequence_output.view(N, M * L, H), passage_scores)  # (N, M * L, M)
+        passage_scores = passage_scores.view(N * M, L, M)  # (N * M, L, M)
+        # Words similar to most of the passage in the batch will receive higher scores
+        passage_scores = passage_scores.sum(-1, keepdim=True)  # (N* M, L, 1)
+        # zero = torch.tensor(0).to(passage_scores)
+        # passage_scores = torch.where(
+        #     attention_mask, passage_scores.sum(-1), zero).unsqueeze(-1)  # (N * M, L, 1)
+
+        # Get start and end predictions
+        logits = self.bottleneck(sequence_output)  # (N * M, L, S), where S is bottleneck size
+        logits = torch.cat([logits, passage_scores], dim=-1)  # (N * M, L, S + 1)
+        logits = self.qa_outputs(logits)  # (N * M, L, 2)
+
+        start_logits, end_logits = logits.split(1, dim=-1)
+        start_logits = start_logits.squeeze(-1)  # (N * M, L)
+        end_logits = end_logits.squeeze(-1)  # (N * M, L)
+
+        return start_logits, end_logits, passage_scores[:, 0, :]  # (N * M, 1)
+
+
+def compute_loss(start_positions, end_positions, answer_mask, start_logits, end_logits, relevance_logits, N, M, 
+                 use_simple_loss=False):
+    start_positions = start_positions.view(N * M, -1)  # (N * M, K), where K = `cfg.train.max_n_answers`
+    end_positions = end_positions.view(N * M, -1)  # (N * M, K)
+    answer_mask = answer_mask.view(N * M, -1)  # (N * M, K)
+
+    start_logits = start_logits.view(N * M, -1)  # (N * M, L)
+    end_logits = end_logits.view(N * M, -1)  # (N * M, L)
+
+    answer_mask = answer_mask.float().to(start_logits.device)  # (N * M, 1)
+
+    ignored_index = start_logits.size(1)  # L
     start_positions.clamp_(0, ignored_index)
     end_positions.clamp_(0, ignored_index)
     loss_fct = CrossEntropyLoss(reduce=False, ignore_index=ignored_index)
 
     # compute switch loss
-    relevance_logits = relevance_logits.view(N, M)
-    switch_labels = torch.zeros(N, dtype=torch.long).cuda()
-    switch_loss = torch.sum(loss_fct(relevance_logits, switch_labels))
+    relevance_logits = relevance_logits.view(N, M)  # (N, M)
+    switch_labels = torch.zeros(N, dtype=torch.long).to(start_logits.device)  # (N,)
+    switch_loss = torch.sum(loss_fct(relevance_logits, switch_labels))  # scalar
 
     # compute span loss
     start_losses = [(loss_fct(start_logits, _start_positions) * _span_mask)
-                    for (_start_positions, _span_mask)
+                    for (_start_positions, _span_mask)  # (N * M,) and (N * M,) 
                     in zip(torch.unbind(start_positions, dim=1), torch.unbind(answer_mask, dim=1))]
 
     end_losses = [(loss_fct(end_logits, _end_positions) * _span_mask)
-                  for (_end_positions, _span_mask)
+                  for (_end_positions, _span_mask)  # (N * M,) and (N * M,)
                   in zip(torch.unbind(end_positions, dim=1), torch.unbind(answer_mask, dim=1))]
     loss_tensor = torch.cat([t.unsqueeze(1) for t in start_losses], dim=1) + \
-                  torch.cat([t.unsqueeze(1) for t in end_losses], dim=1)
+                  torch.cat([t.unsqueeze(1) for t in end_losses], dim=1)  # (N * M, K)
 
-    loss_tensor = loss_tensor.view(N, M, -1).max(dim=1)[0]
-    span_loss = _calc_mml(loss_tensor)
+    if use_simple_loss:
+        span_loss = loss_tensor.sum()
+    else:
+        loss_tensor = loss_tensor.view(N, M, -1).max(dim=1)[0]  # (N, K)
+        span_loss = _calc_mml(loss_tensor)
+
     return span_loss + switch_loss
 
 
@@ -262,10 +320,10 @@ def _create_question_passages_tensors(positives: List[ReaderPassage], negatives:
         positive_input_ids = _pad_to_len(positives[positive_idx].sequence_ids, pad_token_id, max_len)
 
         answer_starts_tensor = torch.zeros((total_size, max_n_answers)).long()
-        answer_starts_tensor[0, 0:len(answer_starts)] = torch.tensor(answer_starts)
+        answer_starts_tensor[0, 0:len(answer_starts)] = torch.tensor(answer_starts)  # only first passage contains the answer
 
         answer_ends_tensor = torch.zeros((total_size, max_n_answers)).long()
-        answer_ends_tensor[0, 0:len(answer_ends)] = torch.tensor(answer_ends)
+        answer_ends_tensor[0, 0:len(answer_ends)] = torch.tensor(answer_ends)  # only first passage contains the answer
 
         answer_mask = torch.zeros((total_size, max_n_answers), dtype=torch.long)
         answer_mask[0, 0:len(answer_starts)] = torch.tensor([1 for _ in range(len(answer_starts))])
