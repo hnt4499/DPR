@@ -36,7 +36,8 @@ class Reader(nn.Module):
         self.qa_classifier = nn.Linear(hidden_size, 1)
         init_weights([self.qa_outputs, self.qa_classifier])
 
-    def forward(self, input_ids: T, attention_mask: T, start_positions=None, end_positions=None, answer_mask=None):
+    def forward(self, input_ids: T, attention_mask: T, start_positions=None, end_positions=None, answer_mask=None, 
+                use_simple_loss=False):
         # notations: N - number of questions in a batch, M - number of passages per questions, L - sequence length
         N, M, L = input_ids.size()
         input_ids = input_ids.view(N * M, L)
@@ -45,7 +46,7 @@ class Reader(nn.Module):
         start_logits, end_logits, relevance_logits = self._forward(input_ids, attention_mask)
         if self.training:
             return compute_loss(start_positions, end_positions, answer_mask, start_logits, end_logits, relevance_logits,
-                                N, M)
+                                N, M, use_simple_loss=use_simple_loss)
 
         return start_logits.view(N, M, L), end_logits.view(N, M, L), relevance_logits.view(N, M)
 
