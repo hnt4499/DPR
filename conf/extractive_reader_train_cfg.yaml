@@ -69,6 +69,9 @@ fp16: False
 #        "See details at https://nvidia.github.io/apex/amp.html
 fp16_opt_level: O1
 
+# Gradient checkpointing settings
+gradient_checkpointing: False
+
 # a list of tokens to avoid tokenization
 special_tokens:
 
