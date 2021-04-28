@@ -81,8 +81,9 @@ class BiEncoderTrainer(object):
             saved_state = load_states_from_checkpoint(model_file)
             set_cfg_params_from_state(saved_state.encoder_params, cfg)
 
+        gradient_checkpointing = getattr(cfg, "gradient_checkpointing", False)
         tensorizer, model, optimizer = init_biencoder_components(
-            cfg.encoder.encoder_model_type, cfg
+            cfg.encoder.encoder_model_type, cfg, gradient_checkpointing=gradient_checkpointing,
         )
         with omegaconf.open_dict(cfg):
             cfg.others = DictConfig({"is_matching": isinstance(model, (Match_BiEncoder, MatchGated_BiEncoder))})
@@ -95,6 +96,7 @@ class BiEncoderTrainer(object):
             cfg.local_rank,
             cfg.fp16,
             cfg.fp16_opt_level,
+            gradient_checkpointing=gradient_checkpointing,
         )
         self.biencoder = model
         self.optimizer = optimizer
