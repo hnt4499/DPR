@@ -120,12 +120,18 @@ class ExtractiveReaderDataset(torch.utils.data.Dataset):
 
     def load_data(
         self,
+        debugging: bool = False,
     ):
         data_files = glob.glob(self.files)
         logger.info("Data files: %s", data_files)
         if not data_files:
             raise RuntimeError("No Data files found")
         preprocessed_data_files = self._get_preprocessed_files(data_files)
+
+        if debugging:
+            logger.info("Debugging mode is on. Restricting to at most 2 data files.")
+            preprocessed_data_files = preprocessed_data_files[:2]
+
         self.data = read_serialized_data_from_files(preprocessed_data_files)
 
     def _get_preprocessed_files(

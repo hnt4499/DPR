@@ -71,3 +71,6 @@ fp16_opt_level: O1
 
 # a list of tokens to avoid tokenization
 special_tokens:
+
+# Debug
+debugging: False

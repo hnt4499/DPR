@@ -97,6 +97,7 @@ class ReaderTrainer(object):
         self.reader = reader
         self.optimizer = optimizer
         self.tensorizer = tensorizer
+        self.debugging = getattr(self.cfg, "debugging", False)
         self.dev_iterator = None
         self.start_epoch = 0
         self.start_batch = 0
@@ -140,7 +141,7 @@ class ReaderTrainer(object):
             self.cfg.num_workers,
         )
 
-        dataset.load_data()
+        dataset.load_data(debugging=self.debugging)
 
         iterator = ShardedDataIterator(
             dataset,
