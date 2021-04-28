@@ -166,14 +166,14 @@ class HFBertEncoder(BertModel):
         pretrained: bool = True,
         **kwargs
     ) -> BertModel:
-        cfg = BertConfig.from_pretrained(cfg_name if cfg_name else "bert-base-uncased")
+        cfg = BertConfig.from_pretrained(cfg_name if cfg_name else "bert-base-uncased", **kwargs)
         if dropout != 0:
             cfg.attention_probs_dropout_prob = dropout
             cfg.hidden_dropout_prob = dropout
 
         if pretrained:
             return cls.from_pretrained(
-                cfg_name, config=cfg, project_dim=projection_dim, **kwargs
+                cfg_name, config=cfg, project_dim=projection_dim,
             )
         else:
             return HFBertEncoder(cfg, project_dim=projection_dim)

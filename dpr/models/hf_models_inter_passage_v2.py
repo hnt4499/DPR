@@ -72,14 +72,14 @@ class HFBertEncoderWithNumLayers(HFBertEncoder):
         **kwargs
     ) -> BertModel:
         cfg = BertConfig.from_pretrained(cfg_name if cfg_name else "bert-base-uncased", 
-                                         num_hidden_layers=num_hidden_layers)
+                                         num_hidden_layers=num_hidden_layers, **kwargs)
         if dropout != 0:
             cfg.attention_probs_dropout_prob = dropout
             cfg.hidden_dropout_prob = dropout
 
         if pretrained:
             return cls.from_pretrained(
-                cfg_name, config=cfg, project_dim=projection_dim, **kwargs
+                cfg_name, config=cfg, project_dim=projection_dim,
             )
         else:
             return HFBertEncoderWithNumLayers(cfg, project_dim=projection_dim)

@@ -135,6 +135,7 @@ class InterPassageReaderV2(InterPassageReader):
         # Output layers
         self.bottleneck_size = bottleneck_size
         self.bottleneck = nn.Linear(self.config.hidden_size, bottleneck_size)
+        self.layer_norm = nn.LayerNorm(normalized_shape=(bottleneck_size + 1,))
         self.qa_outputs = nn.Linear(bottleneck_size + 1, 2)
 
     def _forward(self, input_ids, attention_mask, N, M):
@@ -153,14 +154,18 @@ class InterPassageReaderV2(InterPassageReader):
         passage_scores = torch.matmul(sequence_output.view(N, M * L, H), passage_scores)  # (N, M * L, M)
         passage_scores = passage_scores.view(N * M, L, M)  # (N * M, L, M)
         # Words similar to most of the passage in the batch will receive higher scores
-        passage_scores = passage_scores.sum(-1, keepdim=True)  # (N* M, L, 1)
-        # zero = torch.tensor(0).to(passage_scores)
-        # passage_scores = torch.where(
-        #     attention_mask, passage_scores.sum(-1), zero).unsqueeze(-1)  # (N * M, L, 1)
+        zero = torch.tensor(0).to(passage_scores)
+        passage_scores = torch.where(
+            attention_mask, passage_scores.sum(-1), zero).unsqueeze(-1)  # (N * M, L, 1)
 
         # Get start and end predictions
         logits = self.bottleneck(sequence_output)  # (N * M, L, S), where S is bottleneck size
         logits = torch.cat([logits, passage_scores], dim=-1)  # (N * M, L, S + 1)
+        logits = self.layer_norm(
+            logits.view(-1, self.bottleneck_size + 1)
+        ).view(-1, L, self.bottleneck_size + 1)  # (N * M, L, S + 1)
+
+        # Final output layer
         logits = self.qa_outputs(logits)  # (N * M, L, 2)
 
         start_logits, end_logits = logits.split(1, dim=-1)
@@ -202,10 +207,10 @@ def compute_loss(start_positions, end_positions, answer_mask, start_logits, end_
     loss_tensor = torch.cat([t.unsqueeze(1) for t in start_losses], dim=1) + \
                   torch.cat([t.unsqueeze(1) for t in end_losses], dim=1)  # (N * M, K)
 
+    loss_tensor = loss_tensor.view(N, M, -1).max(dim=1)[0]  # (N, K)
     if use_simple_loss:
-        span_loss = loss_tensor.sum()
+        span_loss = _calc_mml_v2(loss_tensor)
     else:
-        loss_tensor = loss_tensor.view(N, M, -1).max(dim=1)[0]  # (N, K)
         span_loss = _calc_mml(loss_tensor)
 
     return span_loss + switch_loss
@@ -272,6 +277,16 @@ def _calc_mml(loss_tensor):
         - loss_tensor - 1e10 * (loss_tensor == 0).float()), 1)
     return -torch.sum(torch.log(marginal_likelihood +
                                 torch.ones(loss_tensor.size(0)).cuda() * (marginal_likelihood == 0).float()))
+
+
+def _calc_mml_v2(loss_tensor):
+    zero = torch.tensor(0).to(loss_tensor)
+    one = torch.tensor(1).to(loss_tensor)
+
+    marginal_likelihood = torch.where(loss_tensor == 0, zero, torch.exp(-loss_tensor))  # (N, K)
+    marginal_likelihood = torch.sum(marginal_likelihood, 1)  # (N,)
+    marginal_likelihood = torch.where(marginal_likelihood == 0, one, marginal_likelihood)  # (N,)
+    return -torch.sum(torch.log(marginal_likelihood))  # scalar
 
 
 def _pad_to_len(seq: T, pad_id: int, max_len: int):
