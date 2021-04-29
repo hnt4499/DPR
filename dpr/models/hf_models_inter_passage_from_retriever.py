@@ -14,11 +14,10 @@ from functools import partial
 
 import torch
 import torch.nn as nn
-from transformers.modeling_bert import BertModel, BertConfig
 from transformers.optimization import AdamW
 
 from dpr.utils.model_utils import load_states_from_checkpoint
-from .hf_models import HFBertEncoder, get_bert_tensorizer
+from .hf_models_inter_passage import HFBertEncoderWithNumLayers, get_bert_tensorizer
 from .reader import InterPassageReader
 
 logger = logging.getLogger(__name__)
@@ -103,31 +102,6 @@ def get_bert_reader_components(cfg, inference_only: bool = False, **kwargs):
 
     tensorizer = get_bert_tensorizer(cfg)
     return tensorizer, reader, optimizer
-
-
-class HFBertEncoderWithNumLayers(HFBertEncoder):
-    @classmethod
-    def init_encoder(
-        cls,
-        cfg_name: str,
-        num_hidden_layers: int,
-        projection_dim: int = 0,
-        dropout: float = 0.1,
-        pretrained: bool = True,
-        **kwargs
-    ) -> BertModel:
-        cfg = BertConfig.from_pretrained(cfg_name if cfg_name else "bert-base-uncased", 
-                                         num_hidden_layers=num_hidden_layers, **kwargs)
-        if dropout != 0:
-            cfg.attention_probs_dropout_prob = dropout
-            cfg.hidden_dropout_prob = dropout
-
-        if pretrained:
-            return cls.from_pretrained(
-                cfg_name, config=cfg, project_dim=projection_dim,
-            )
-        else:
-            return HFBertEncoderWithNumLayers(cfg, project_dim=projection_dim)
 
 
 def get_optimizer(

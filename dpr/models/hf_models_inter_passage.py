@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Encoder model wrappers based on HuggingFace code
+Reader model with inter-passage modeling.
 """
 
 import logging
@@ -81,4 +81,4 @@ class HFBertEncoderWithNumLayers(HFBertEncoder):
                 cfg_name, config=cfg, project_dim=projection_dim,
             )
         else:
-            return HFBertEncoderWithNumLayers(cfg, project_dim=projection_dim)
+            return cls(cfg, project_dim=projection_dim)

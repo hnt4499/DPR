@@ -6,14 +6,13 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Encoder model wrappers based on HuggingFace code
+Reader model with inter-passage modeling.
 """
 
 import logging
 
-from transformers.modeling_bert import BertModel, BertConfig
 
-from.hf_models import HFBertEncoder, get_optimizer, get_bert_tensorizer
+from.hf_models_inter_passage import get_optimizer, get_bert_tensorizer, HFBertEncoderWithNumLayers
 from .reader import InterPassageReaderV2
 
 logger = logging.getLogger(__name__)
@@ -58,28 +57,3 @@ def get_bert_reader_components(cfg, inference_only: bool = False, **kwargs):
 
     tensorizer = get_bert_tensorizer(cfg)
     return tensorizer, reader, optimizer
-
-
-class HFBertEncoderWithNumLayers(HFBertEncoder):
-    @classmethod
-    def init_encoder(
-        cls,
-        cfg_name: str,
-        num_hidden_layers: int,
-        projection_dim: int = 0,
-        dropout: float = 0.1,
-        pretrained: bool = True,
-        **kwargs
-    ) -> BertModel:
-        cfg = BertConfig.from_pretrained(cfg_name if cfg_name else "bert-base-uncased", 
-                                         num_hidden_layers=num_hidden_layers, **kwargs)
-        if dropout != 0:
-            cfg.attention_probs_dropout_prob = dropout
-            cfg.hidden_dropout_prob = dropout
-
-        if pretrained:
-            return cls.from_pretrained(
-                cfg_name, config=cfg, project_dim=projection_dim,
-            )
-        else:
-            return HFBertEncoderWithNumLayers(cfg, project_dim=projection_dim)
