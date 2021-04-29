@@ -21,6 +21,7 @@ from torch.nn import CrossEntropyLoss
 
 from dpr.data.reader_data import ReaderSample, ReaderPassage
 from dpr.utils.model_utils import init_weights, CheckpointState, load_state_dict_to_model
+from dpr.utils.data_utils import Tensorizer
 
 logger = logging.getLogger()
 
@@ -216,17 +217,18 @@ def compute_loss(start_positions, end_positions, answer_mask, start_logits, end_
     return span_loss + switch_loss
 
 
-def create_reader_input(pad_token_id: int,
-                        samples: List[ReaderSample],
-                        passages_per_question: int,
-                        max_length: int,
-                        max_n_answers: int,
-                        is_train: bool,
-                        shuffle: bool,
-                        ) -> ReaderBatch:
+def create_reader_input(
+    tensorizer: Tensorizer,
+    samples: List[ReaderSample],
+    passages_per_question: int,
+    max_length: int,
+    max_n_answers: int,
+    is_train: bool,
+    shuffle: bool,
+) -> ReaderBatch:
     """
     Creates a reader batch instance out of a list of ReaderSample-s
-    :param pad_token_id: id of the padding token
+    :param tensorizer: initialized tensorizer (which contains the tokenizer)
     :param samples: list of samples to create the batch for
     :param passages_per_question: amount of passages for every question in a batch
     :param max_length: max model input sequence length
@@ -239,20 +241,24 @@ def create_reader_input(pad_token_id: int,
     start_positions = []
     end_positions = []
     answers_masks = []
-    empty_sequence = torch.Tensor().new_full((max_length,), pad_token_id, dtype=torch.long)
+
+    empty_sequence = torch.Tensor().new_full((max_length,), tensorizer.get_pad_id(), dtype=torch.long)
 
     for sample in samples:
         positive_ctxs = sample.positive_passages
         negative_ctxs = sample.negative_passages if is_train else sample.passages
 
-        sample_tensors = _create_question_passages_tensors(positive_ctxs,
-                                                           negative_ctxs,
-                                                           passages_per_question,
-                                                           empty_sequence,
-                                                           max_n_answers,
-                                                           pad_token_id,
-                                                           is_train,
-                                                           is_random=shuffle)
+        sample_tensors = _create_question_passages_tensors(
+            tensorizer,
+            positive_ctxs,
+            negative_ctxs,
+            passages_per_question,
+            empty_sequence,
+            max_n_answers,
+            is_train,
+            is_random=shuffle
+        )
+
         if not sample_tensors:
             logger.warning('No valid passages combination for question=%s ', sample.question)
             continue
@@ -312,13 +318,19 @@ def _get_positive_idx(positives: List[ReaderPassage], max_len: int, is_random: b
     return positive_idx
 
 
-def _create_question_passages_tensors(positives: List[ReaderPassage], negatives: List[ReaderPassage], total_size: int,
-                                      empty_ids: T,
-                                      max_n_answers: int,
-                                      pad_token_id: int,
-                                      is_train: bool,
-                                      is_random: bool = True):
+def _create_question_passages_tensors(
+    tensorizer: Tensorizer,
+    positives: List[ReaderPassage], 
+    negatives: List[ReaderPassage], 
+    total_size: int,
+    empty_ids: T,
+    max_n_answers: int,
+    is_train: bool,
+    is_random: bool = True
+):
     max_len = empty_ids.size(0)
+    pad_token_id = tensorizer.get_pad_id()
+
     if is_train:
         # select just one positive
         positive_idx = _get_positive_idx(positives, max_len, is_random)
@@ -333,7 +345,12 @@ def _create_question_passages_tensors(positives: List[ReaderPassage], negatives:
         assert all(s < max_len for s in answer_starts)
         assert all(e < max_len for e in answer_ends)
 
-        positive_input_ids = _pad_to_len(positives[positive_idx].sequence_ids, pad_token_id, max_len)
+        sequence_ids = tensorizer.concatenate_inputs({
+            "question": positives[positive_idx].question_token_ids,
+            "passage_title": positives[positive_idx].title_token_ids,
+            "passage": positives[positive_idx].passage_token_ids,
+        })
+        positive_input_ids = _pad_to_len(sequence_ids, pad_token_id, max_len)
 
         answer_starts_tensor = torch.zeros((total_size, max_n_answers)).long()
         answer_starts_tensor[0, 0:len(answer_starts)] = torch.tensor(answer_starts)  # only first passage contains the answer
@@ -358,7 +375,15 @@ def _create_question_passages_tensors(positives: List[ReaderPassage], negatives:
 
     negative_idxs = negative_idxs[:total_size - positives_num]
 
-    negatives_selected = [_pad_to_len(negatives[i].sequence_ids, pad_token_id, max_len) for i in negative_idxs]
+    negatives_selected = []
+    for negative_idx in negative_idxs:
+        negative = negatives[negative_idx]
+        negative_selected = tensorizer.concatenate_inputs({
+            "question": negative.question_token_ids,
+            "passage_title": negative.title_token_ids,
+            "passage": negative.passage_token_ids,
+        })
+        negatives_selected.append(_pad_to_len(negative_selected, pad_token_id, max_len))
 
     while len(negatives_selected) < total_size - positives_num:
         negatives_selected.append(empty_ids.clone())

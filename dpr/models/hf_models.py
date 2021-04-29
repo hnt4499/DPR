@@ -11,8 +11,9 @@ Encoder model wrappers based on HuggingFace code
 
 from functools import partial
 import logging
-from typing import Tuple
+from typing import Tuple, List, Dict
 
+import numpy as np
 import torch
 from torch import Tensor as T
 from torch import nn
@@ -215,7 +216,7 @@ class HFBertEncoder(BertModel):
                 cfg_name, config=cfg, project_dim=projection_dim,
             )
         else:
-            return HFBertEncoder(cfg, project_dim=projection_dim)
+            return cls(cfg, project_dim=projection_dim)
 
     def forward(
         self,
@@ -314,6 +315,43 @@ class BertTensorizer(Tensorizer):
             token_ids[-1] = self.tokenizer.sep_token_id
 
         return torch.tensor(token_ids)
+    
+    def concatenate_inputs(self, ids: Dict[str, List[int]]) -> T:
+        """
+        Simply concatenate inputs by adding [CLS] at the beginning and [SEP] at between and end.
+        """
+        allowed_keys = ["question", "passage_title", "passsage"]
+        assert all(key in allowed_keys for key in ids.keys())
+
+        # 3 mode: only question, only passage ("passage_title" + "passage") or all
+        current_mode = set(ids.keys())
+        allowed_modes = [{"question"}, {"passage_title", "passage"}, {"question", "passage_title", "passage"}]
+        assert current_mode in allowed_modes
+
+        cls_token = self.tokenizer.cls_token_id
+        sep_token = self.tokenizer.sep_token_id
+
+        if current_mode == {"question"}:
+            token_ids =  np.concatenate([cls_token], ids["question"], [sep_token])
+        elif current_mode == {"passage_title", "passage"}:
+            token_ids = np.concatenate(
+                [cls_token],
+                ids["passage_title"],
+                [sep_token],
+                ids["passage"],
+                [sep_token]
+            )
+        else:
+            token_ids = np.concatenate(
+                [cls_token],
+                ids["question"],
+                [sep_token],
+                ids["passage_title"],
+                [sep_token],
+                ids["passage"],
+                [sep_token]
+            )
+        return torch.from_numpy(token_ids)
 
     def get_pair_separator_ids(self) -> T:
         return torch.tensor([self.tokenizer.sep_token_id])

@@ -21,7 +21,7 @@ import math
 import numpy as np
 import torch
 from torch import Tensor as T
-from typing import List, Iterator, Callable, Tuple
+from typing import List, Iterator, Callable, Tuple, Dict
 
 logger = logging.getLogger()
 
@@ -454,6 +454,15 @@ class Tensorizer(object):
         add_special_tokens: bool = True,
         apply_max_len: bool = True,
     ):
+        raise NotImplementedError
+    
+    def concatenate_inputs(
+        self,
+        ids: Dict[str, List[int]],
+    ) -> T:
+        """
+        Concatenate inputs for either retriever or reader model.
+        """
         raise NotImplementedError
 
     def get_pair_separator_ids(self) -> T:

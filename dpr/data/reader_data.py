@@ -42,28 +42,30 @@ class ReaderPassage(object):
         score=None,
         has_answer: bool = None,
     ):
-        self.id = id
+        self.id = id  # passage ID
         # string passage representations
         self.passage_text = text
         self.title = title
         self.score = score
         self.has_answer = has_answer
-        self.passage_token_ids = None
-        # offset of the actual passage (i.e. not a question or may be title) in the sequence_ids
-        self.passage_offset = None
         self.answers_spans = None
-        # passage token ids
-        self.sequence_ids = None
+
+        # Token ids
+        self.question_token_ids = None
+        self.title_token_ids = None
+        self.passage_token_ids = None
 
     def on_serialize(self):
-        # store only final sequence_ids and the ctx offset
-        self.sequence_ids = self.sequence_ids.numpy()
         self.passage_text = None
         self.title = None
-        self.passage_token_ids = None
+
+        self.question_token_ids = self.question_token_ids.numpy()
+        self.title_token_ids = self.title_token_ids.numpy()
+        self.passage_token_ids = self.passage_token_ids.numpy()
 
     def on_deserialize(self):
-        self.sequence_ids = torch.tensor(self.sequence_ids)
+        # Do nothing
+        pass
 
 
 class ReaderSample(object):
@@ -283,7 +285,6 @@ SpanPrediction = collections.namedtuple(
 ReaderPreprocessingCfg = collections.namedtuple(
     "ReaderPreprocessingCfg",
     [
-        "use_tailing_sep",
         "skip_no_positves",
         "include_gold_passage",
         "gold_page_only_positives",
@@ -295,7 +296,6 @@ ReaderPreprocessingCfg = collections.namedtuple(
 )
 
 DEFAULT_PREPROCESSING_CFG_TRAIN = ReaderPreprocessingCfg(
-    use_tailing_sep=False,
     skip_no_positves=True,
     include_gold_passage=False,
     gold_page_only_positives=True,  # whether positive passages should be from the gold passages. otherwise it just needs to contain answer string
@@ -324,8 +324,6 @@ def preprocess_retriever_data(
     :param is_train_set: if the data should be processed as a train set
     :return: iterable of ReaderSample objects which can be consumed by the reader model
     """
-    sep_tensor = tensorizer.get_pair_separator_ids()  # separator can be a multi token
-
     gold_passage_map, canonical_questions = (
         _get_gold_ctx_dict(gold_info_file) if gold_info_file else ({}, {})
     )
@@ -334,27 +332,21 @@ def preprocess_retriever_data(
     positives_from_gold = 0
 
     def create_reader_sample_ids(sample: ReaderPassage, question: str):
-        question_and_title = tensorizer.text_to_tensor(
-            sample.title, title=question, add_special_tokens=True
-        )
-        if sample.passage_token_ids is None:
-            sample.passage_token_ids = tensorizer.text_to_tensor(
-                sample.passage_text, add_special_tokens=False
+        if sample.question_token_ids is None:
+            sample.question_token_ids = tensorizer.text_to_tensor(
+                question, add_special_tokens=False,
+            )
+        
+        if sample.title_token_ids is None:
+            sample.title_token_ids = tensorizer.text_to_tensor(
+                sample.title, add_special_tokens=False,
             )
 
-        all_concatenated, shift = _concat_pair(
-            question_and_title,
-            sample.passage_token_ids,
-            tailing_sep=sep_tensor if cfg.use_tailing_sep else None,
-        )
+        if sample.passage_token_ids is None:
+            sample.passage_token_ids = tensorizer.text_to_tensor(
+                sample.passage_text, add_special_tokens=False,
+            )
 
-        sample.sequence_ids = all_concatenated
-        sample.passage_offset = shift
-        assert shift > 1
-        if sample.has_answer and is_train_set:
-            sample.answers_spans = [
-                (span[0] + shift, span[1] + shift) for span in sample.answers_spans
-            ]
         return sample
 
     for sample in samples:
@@ -578,12 +570,6 @@ def _find_answer_positions(ctx_ids: T, answer: T) -> List[Tuple[int, int]]:
         if (answer == ctx_ids[i : i + a_len]).all():
             answer_occurences.append((i, i + a_len - 1))
     return answer_occurences
-
-
-def _concat_pair(t1: T, t2: T, middle_sep: T = None, tailing_sep: T = None):
-    middle = [middle_sep] if middle_sep else []
-    r = [t1] + middle + [t2] + ([tailing_sep] if tailing_sep else [])
-    return torch.cat(r, dim=0), t1.size(0) + len(middle)
 
 
 def _get_gold_ctx_dict(file: str) -> Tuple[Dict[str, ReaderPassage], Dict[str, str]]:
