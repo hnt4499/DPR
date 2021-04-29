@@ -316,33 +316,34 @@ class BertTensorizer(Tensorizer):
 
         return torch.tensor(token_ids)
     
-    def concatenate_inputs(self, ids: Dict[str, List[int]]) -> T:
+    def concatenate_inputs(self, ids: Dict[str, List[int]], get_passage_offset: bool = False) -> T:
         """
         Simply concatenate inputs by adding [CLS] at the beginning and [SEP] at between and end.
         """
-        allowed_keys = ["question", "passage_title", "passsage"]
-        assert all(key in allowed_keys for key in ids.keys())
-
         # 3 mode: only question, only passage ("passage_title" + "passage") or all
         current_mode = set(ids.keys())
         allowed_modes = [{"question"}, {"passage_title", "passage"}, {"question", "passage_title", "passage"}]
-        assert current_mode in allowed_modes
+        if current_mode not in allowed_modes:
+            raise ValueError(f"Unexpected keys: {list(ids.keys())}")
 
         cls_token = self.tokenizer.cls_token_id
         sep_token = self.tokenizer.sep_token_id
 
         if current_mode == {"question"}:
+            assert not get_passage_offset
             token_ids =  np.concatenate([cls_token], ids["question"], [sep_token])
         elif current_mode == {"passage_title", "passage"}:
-            token_ids = np.concatenate(
+            token_ids = np.concatenate([
                 [cls_token],
                 ids["passage_title"],
                 [sep_token],
                 ids["passage"],
                 [sep_token]
-            )
+            ])
+            if get_passage_offset:
+                passage_offset = 2 + len(ids["passage_title"])
         else:
-            token_ids = np.concatenate(
+            token_ids = np.concatenate([
                 [cls_token],
                 ids["question"],
                 [sep_token],
@@ -350,7 +351,12 @@ class BertTensorizer(Tensorizer):
                 [sep_token],
                 ids["passage"],
                 [sep_token]
-            )
+            ])
+            if get_passage_offset:
+                passage_offset = 3 + len(ids["question"]) + len(ids["passage_title"])
+        
+        if get_passage_offset:
+            return torch.from_numpy(token_ids), passage_offset
         return torch.from_numpy(token_ids)
 
     def get_pair_separator_ids(self) -> T:

@@ -459,6 +459,7 @@ class Tensorizer(object):
     def concatenate_inputs(
         self,
         ids: Dict[str, List[int]],
+        get_passage_offset: bool = False,
     ) -> T:
         """
         Concatenate inputs for either retriever or reader model.

@@ -336,6 +336,22 @@ def _create_question_passages_tensors(
         positive_idx = _get_positive_idx(positives, max_len, is_random)
         if positive_idx is None:
             return None
+        
+        positive = positives[positive_idx]
+        
+        if getattr(positive, "sequence_ids", None) is None:
+            sequence_ids, passage_offset = tensorizer.concatenate_inputs({
+                "question": positive.question_token_ids,
+                "passage_title": positive.title_token_ids,
+                "passage": positive.passage_token_ids,
+            }, get_passage_offset=True)
+            
+            positive.sequence_ids = sequence_ids
+            positive.passage_offset = passage_offset
+            positive.answers_spans = [
+                (start + passage_offset, end + passage_offset) 
+                for start, end in positive.answers_spans
+            ]
 
         positive_a_spans = _get_answer_spans(positive_idx, positives, max_len)[0: max_n_answers]
 
@@ -344,12 +360,7 @@ def _create_question_passages_tensors(
 
         assert all(s < max_len for s in answer_starts)
         assert all(e < max_len for e in answer_ends)
-
-        sequence_ids = tensorizer.concatenate_inputs({
-            "question": positives[positive_idx].question_token_ids,
-            "passage_title": positives[positive_idx].title_token_ids,
-            "passage": positives[positive_idx].passage_token_ids,
-        })
+        
         positive_input_ids = _pad_to_len(sequence_ids, pad_token_id, max_len)
 
         answer_starts_tensor = torch.zeros((total_size, max_n_answers)).long()
@@ -378,12 +389,17 @@ def _create_question_passages_tensors(
     negatives_selected = []
     for negative_idx in negative_idxs:
         negative = negatives[negative_idx]
-        negative_selected = tensorizer.concatenate_inputs({
-            "question": negative.question_token_ids,
-            "passage_title": negative.title_token_ids,
-            "passage": negative.passage_token_ids,
-        })
-        negatives_selected.append(_pad_to_len(negative_selected, pad_token_id, max_len))
+        
+        if getattr(negative, "sequence_ids", None) is None:
+            sequence_ids, passage_offset = tensorizer.concatenate_inputs({
+                "question": negative.question_token_ids,
+                "passage_title": negative.title_token_ids,
+                "passage": negative.passage_token_ids,
+            }, get_passage_offset=True)
+            negative.sequence_ids = sequence_ids
+            negative.passage_offset = passage_offset
+
+        negatives_selected.append(_pad_to_len(negative.sequence_ids, pad_token_id, max_len))
 
     while len(negatives_selected) < total_size - positives_num:
         negatives_selected.append(empty_ids.clone())

@@ -13,10 +13,10 @@ do_lower_case: True
 seed: 42
 
 # glob expression for train data files
-train_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single/train.json
+train_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new/train.json
 
 # glob expression for dev data files
-dev_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single/dev.json
+dev_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new/dev.json
 
 # Total amount of positive and negative passages per question
 passages_per_question: 8

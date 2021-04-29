@@ -54,6 +54,10 @@ class ReaderPassage(object):
         self.question_token_ids = None
         self.title_token_ids = None
         self.passage_token_ids = None
+        
+        # For backward compatibility
+        self.sequence_ids = None
+        self.passage_offset = None
 
     def on_serialize(self):
         self.passage_text = None
