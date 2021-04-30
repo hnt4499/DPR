@@ -361,7 +361,7 @@ def _create_question_passages_tensors(
         assert all(s < max_len for s in answer_starts)
         assert all(e < max_len for e in answer_ends)
         
-        positive_input_ids = _pad_to_len(sequence_ids, pad_token_id, max_len)
+        positive_input_ids = _pad_to_len(positive.sequence_ids, pad_token_id, max_len)
 
         answer_starts_tensor = torch.zeros((total_size, max_n_answers)).long()
         answer_starts_tensor[0, 0:len(answer_starts)] = torch.tensor(answer_starts)  # only first passage contains the answer
