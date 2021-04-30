@@ -38,7 +38,7 @@ class Reader(nn.Module):
         init_weights([self.qa_outputs, self.qa_classifier])
 
     def forward(self, input_ids: T, attention_mask: T, start_positions=None, end_positions=None, answer_mask=None, 
-                use_simple_loss=False):
+                use_simple_loss: bool = False, average_loss: bool = False):
         # notations: N - number of questions in a batch, M - number of passages per questions, L - sequence length
         N, M, L = input_ids.size()
         input_ids = input_ids.view(N * M, L)
@@ -47,7 +47,7 @@ class Reader(nn.Module):
         start_logits, end_logits, relevance_logits = self._forward(input_ids, attention_mask)
         if self.training:
             return compute_loss(start_positions, end_positions, answer_mask, start_logits, end_logits, relevance_logits,
-                                N, M, use_simple_loss=use_simple_loss)
+                                N, M, use_simple_loss=use_simple_loss, average=average_loss)
 
         return start_logits.view(N, M, L), end_logits.view(N, M, L), relevance_logits.view(N, M)
 
@@ -83,7 +83,7 @@ class InterPassageReader(Reader):
         self.score_layer = nn.Linear(self.inter_passage_config.hidden_size, 1)
 
     def forward(self, input_ids: T, attention_mask: T, start_positions=None, end_positions=None, answer_mask=None, 
-                use_simple_loss=False):
+                use_simple_loss: bool = False, average_loss: bool = False):
         # notations: N - number of questions in a batch, M - number of passages per questions, L - sequence length
         N, M, L = input_ids.size()
         input_ids = input_ids.view(N * M, L)
@@ -92,7 +92,7 @@ class InterPassageReader(Reader):
         start_logits, end_logits, relevance_logits = self._forward(input_ids, attention_mask, N, M)
         if self.training:
             return compute_loss(start_positions, end_positions, answer_mask, start_logits, end_logits, relevance_logits,
-                                N, M, use_simple_loss=use_simple_loss)
+                                N, M, use_simple_loss=use_simple_loss, average=average_loss)
         
         return start_logits.view(N, M, L), end_logits.view(N, M, L), relevance_logits.view(N, M)
 
@@ -177,7 +177,7 @@ class InterPassageReaderV2(InterPassageReader):
 
 
 def compute_loss(start_positions, end_positions, answer_mask, start_logits, end_logits, relevance_logits, N, M, 
-                 use_simple_loss=False):
+                 use_simple_loss=False, average=False):
     start_positions = start_positions.view(N * M, -1)  # (N * M, K), where K = `cfg.train.max_n_answers`
     end_positions = end_positions.view(N * M, -1)  # (N * M, K)
     answer_mask = answer_mask.view(N * M, -1)  # (N * M, K)
@@ -210,9 +210,9 @@ def compute_loss(start_positions, end_positions, answer_mask, start_logits, end_
 
     loss_tensor = loss_tensor.view(N, M, -1).max(dim=1)[0]  # (N, K)
     if use_simple_loss:
-        span_loss = _calc_mml_v2(loss_tensor)
+        span_loss = _calc_mml_v2(loss_tensor, average=average)
     else:
-        span_loss = _calc_mml(loss_tensor)
+        span_loss = _calc_mml(loss_tensor, average=average)
 
     return span_loss + switch_loss
 
@@ -278,21 +278,28 @@ def create_reader_input(
     return ReaderBatch(input_ids, start_positions, end_positions, answers_masks)
 
 
-def _calc_mml(loss_tensor):
-    marginal_likelihood = torch.sum(torch.exp(
-        - loss_tensor - 1e10 * (loss_tensor == 0).float()), 1)
-    return -torch.sum(torch.log(marginal_likelihood +
-                                torch.ones(loss_tensor.size(0)).cuda() * (marginal_likelihood == 0).float()))
+def _calc_mml(loss_tensor, average=False):
+    marginal_likelihood = torch.exp(- loss_tensor - 1e10 * (loss_tensor == 0).float())
+    marginal_likelihood = marginal_likelihood.mean(dim=1) if average else marginal_likelihood.sum(dim=1)
+
+    loss = torch.log(
+        marginal_likelihood +
+        (marginal_likelihood == 0).float()
+    )
+
+    return -loss.mean() if average else -loss.sum()
 
 
-def _calc_mml_v2(loss_tensor):
+def _calc_mml_v2(loss_tensor, average=False):
     zero = torch.tensor(0).to(loss_tensor)
     one = torch.tensor(1).to(loss_tensor)
 
     marginal_likelihood = torch.where(loss_tensor == 0, zero, torch.exp(-loss_tensor))  # (N, K)
-    marginal_likelihood = torch.sum(marginal_likelihood, 1)  # (N,)
+    marginal_likelihood = marginal_likelihood.mean(dim=1) if average else marginal_likelihood.sum(dim=1)  # (N,)
     marginal_likelihood = torch.where(marginal_likelihood == 0, one, marginal_likelihood)  # (N,)
-    return -torch.sum(torch.log(marginal_likelihood))  # scalar
+    
+    loss = torch.log(marginal_likelihood)  # (N,)
+    return -loss.mean() if average else -loss.sum()  # scalar
 
 
 def _pad_to_len(seq: T, pad_id: int, max_len: int):

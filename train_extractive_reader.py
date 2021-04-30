@@ -586,6 +586,7 @@ class ReaderTrainer(object):
                 input.end_positions,
                 input.answers_mask,
                 use_simple_loss=getattr(cfg.train, "use_simple_loss", False),
+                average_loss=getattr(cfg.train, "average_loss", False),
             )
 
         else:
@@ -605,6 +606,7 @@ class ReaderTrainer(object):
                 questions_num,
                 passages_per_question,
                 use_simple_loss=getattr(cfg.train, "use_simple_loss", False),
+                average=getattr(cfg.train, "average_loss", False),
             )
         if cfg.n_gpu > 1:
             loss = loss.mean()
