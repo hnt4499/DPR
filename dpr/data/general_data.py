@@ -208,7 +208,7 @@ class GeneralDataset(torch.utils.data.Dataset):
         else:
             # Sync with other processes
             torch.distributed.barrier()
-            serialized_files = _find_cached_files(data_files[0])
+            serialized_files, out_file_prefix = _find_cached_files(data_files[0])
         return serialized_files
 
 
