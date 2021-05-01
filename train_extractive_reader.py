@@ -229,12 +229,12 @@ class ReaderTrainer(object):
                 self.best_cp_name = cp_name
                 logger.info(f"New Best validation checkpoint {cp_name} with validation score "
                             f"{reader_validation_score:.2f}")
-    
+
     def _gather(self, objects_to_sync: List[object]) -> List[Tuple]:
         """Helper function to gather all needed data."""
         cfg = self.cfg
         distributed_world_size = cfg.distributed_world_size or 1
-        
+
         if distributed_world_size > 1:
             global_objects_to_sync = all_gather_list(
                 objects_to_sync,
@@ -251,7 +251,7 @@ class ReaderTrainer(object):
 
         else:
             gathered_objects = [objects_to_sync]
-        
+
         gathered_objects = list(zip(*gathered_objects))
         return gathered_objects
 
@@ -326,16 +326,16 @@ class ReaderTrainer(object):
                     ]
                 )
                 f1s[n].append(f1_hit)
-        
+
         # Sync between GPUs
         ems, f1s = self._gather([ems, f1s])
-        
+
         em = 0
         for n in sorted(ems[0].keys()):
             ems_n = sum([em[n] for em in ems], [])  # gather and concatenate
             em = np.mean(ems_n)
             logger.info("n=%d\tEM %.2f" % (n, em * 100))
-        
+
         for n in sorted(f1s[0].keys()):
             f1s_n = sum([f1[n] for f1 in f1s], [])  # gather and concatenate
             f1 = np.mean(f1s_n)
@@ -517,7 +517,8 @@ class ReaderTrainer(object):
         for q in range(questions_num):
             sample = samples_batch[q]
 
-            non_empty_passages_num = len(sample.passages)
+            all_passages = sample.positive_passages + sample.negative_passages
+            non_empty_passages_num = len(all_passages)
             nbest = []
             for p in range(passages_per_question):
                 passage_idx = idxs[q, p].item()
@@ -525,7 +526,7 @@ class ReaderTrainer(object):
                     passage_idx >= non_empty_passages_num
                 ):  # empty passage selected, skip
                     continue
-                reader_passage = sample.passages[passage_idx]
+                reader_passage = all_passages[passage_idx]
                 sequence_ids = reader_passage.sequence_ids
                 sequence_len = sequence_ids.size(0)
                 # assuming question & title information is at the beginning of the sequence
