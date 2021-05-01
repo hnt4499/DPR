@@ -37,7 +37,7 @@ class Reader(nn.Module):
         self.qa_classifier = nn.Linear(hidden_size, 1)
         init_weights([self.qa_outputs, self.qa_classifier])
 
-    def forward(self, input_ids: T, attention_mask: T, start_positions=None, end_positions=None, answer_mask=None, 
+    def forward(self, input_ids: T, attention_mask: T, start_positions=None, end_positions=None, answer_mask=None,
                 use_simple_loss: bool = False, average_loss: bool = False):
         # notations: N - number of questions in a batch, M - number of passages per questions, L - sequence length
         N, M, L = input_ids.size()
@@ -60,7 +60,7 @@ class Reader(nn.Module):
         end_logits = end_logits.squeeze(-1)
         rank_logits = self.qa_classifier(sequence_output[:, 0, :])
         return start_logits, end_logits, rank_logits
-    
+
     def load_state(self, saved_state: CheckpointState):
         load_state_dict_to_model(self, saved_state.model_dict)
 
@@ -82,7 +82,7 @@ class InterPassageReader(Reader):
         self.inter_passage_encoder = inter_passage_encoder.encoder  # we don't need embedding layer, etc.
         self.score_layer = nn.Linear(self.inter_passage_config.hidden_size, 1)
 
-    def forward(self, input_ids: T, attention_mask: T, start_positions=None, end_positions=None, answer_mask=None, 
+    def forward(self, input_ids: T, attention_mask: T, start_positions=None, end_positions=None, answer_mask=None,
                 use_simple_loss: bool = False, average_loss: bool = False):
         # notations: N - number of questions in a batch, M - number of passages per questions, L - sequence length
         N, M, L = input_ids.size()
@@ -93,7 +93,7 @@ class InterPassageReader(Reader):
         if self.training:
             return compute_loss(start_positions, end_positions, answer_mask, start_logits, end_logits, relevance_logits,
                                 N, M, use_simple_loss=use_simple_loss, average=average_loss)
-        
+
         return start_logits.view(N, M, L), end_logits.view(N, M, L), relevance_logits.view(N, M)
 
     def _forward(self, input_ids, attention_mask, N, M):
@@ -176,7 +176,7 @@ class InterPassageReaderV2(InterPassageReader):
         return start_logits, end_logits, passage_scores[:, 0, :]  # (N * M, 1)
 
 
-def compute_loss(start_positions, end_positions, answer_mask, start_logits, end_logits, relevance_logits, N, M, 
+def compute_loss(start_positions, end_positions, answer_mask, start_logits, end_logits, relevance_logits, N, M,
                  use_simple_loss=False, average=False):
     start_positions = start_positions.view(N * M, -1)  # (N * M, K), where K = `cfg.train.max_n_answers`
     end_positions = end_positions.view(N * M, -1)  # (N * M, K)
@@ -199,7 +199,7 @@ def compute_loss(start_positions, end_positions, answer_mask, start_logits, end_
 
     # compute span loss
     start_losses = [(loss_fct(start_logits, _start_positions) * _span_mask)
-                    for (_start_positions, _span_mask)  # (N * M,) and (N * M,) 
+                    for (_start_positions, _span_mask)  # (N * M,) and (N * M,)
                     in zip(torch.unbind(start_positions, dim=1), torch.unbind(answer_mask, dim=1))]
 
     end_losses = [(loss_fct(end_logits, _end_positions) * _span_mask)
@@ -245,8 +245,8 @@ def create_reader_input(
     empty_sequence = torch.Tensor().new_full((max_length,), tensorizer.get_pad_id(), dtype=torch.long)
 
     for sample in samples:
-        positive_ctxs = sample.positive_passages
-        negative_ctxs = sample.negative_passages if is_train else sample.passages
+        positive_ctxs = sample.positive_passages if is_train else []
+        negative_ctxs = sample.negative_passages if is_train else sample.positive_passages + sample.negative_passages
 
         sample_tensors = _create_question_passages_tensors(
             tensorizer,
@@ -297,7 +297,7 @@ def _calc_mml_v2(loss_tensor, average=False):
     marginal_likelihood = torch.where(loss_tensor == 0, zero, torch.exp(-loss_tensor))  # (N, K)
     marginal_likelihood = marginal_likelihood.mean(dim=1) if average else marginal_likelihood.sum(dim=1)  # (N,)
     marginal_likelihood = torch.where(marginal_likelihood == 0, one, marginal_likelihood)  # (N,)
-    
+
     loss = torch.log(marginal_likelihood)  # (N,)
     return -loss.mean() if average else -loss.sum()  # scalar
 
@@ -327,8 +327,8 @@ def _get_positive_idx(positives: List[ReaderPassage], max_len: int, is_random: b
 
 def _create_question_passages_tensors(
     tensorizer: Tensorizer,
-    positives: List[ReaderPassage], 
-    negatives: List[ReaderPassage], 
+    positives: List[ReaderPassage],
+    negatives: List[ReaderPassage],
     total_size: int,
     empty_ids: T,
     max_n_answers: int,
@@ -343,20 +343,20 @@ def _create_question_passages_tensors(
         positive_idx = _get_positive_idx(positives, max_len, is_random)
         if positive_idx is None:
             return None
-        
+
         positive = positives[positive_idx]
-        
+
         if getattr(positive, "sequence_ids", None) is None:
             sequence_ids, passage_offset = tensorizer.concatenate_inputs({
                 "question": positive.question_token_ids,
                 "passage_title": positive.title_token_ids,
                 "passage": positive.passage_token_ids,
             }, get_passage_offset=True)
-            
+
             positive.sequence_ids = sequence_ids
             positive.passage_offset = passage_offset
             positive.answers_spans = [
-                (start + passage_offset, end + passage_offset) 
+                (start + passage_offset, end + passage_offset)
                 for start, end in positive.answers_spans
             ]
 
@@ -367,7 +367,7 @@ def _create_question_passages_tensors(
 
         assert all(s < max_len for s in answer_starts)
         assert all(e < max_len for e in answer_ends)
-        
+
         positive_input_ids = _pad_to_len(positive.sequence_ids, pad_token_id, max_len)
 
         answer_starts_tensor = torch.zeros((total_size, max_n_answers)).long()
@@ -396,7 +396,7 @@ def _create_question_passages_tensors(
     negatives_selected = []
     for negative_idx in negative_idxs:
         negative = negatives[negative_idx]
-        
+
         if getattr(negative, "sequence_ids", None) is None:
             sequence_ids, passage_offset = tensorizer.concatenate_inputs({
                 "question": negative.question_token_ids,
