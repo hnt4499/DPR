@@ -39,20 +39,24 @@ class ExtractiveReaderDataset(GeneralDataset):
     def __init__(
         self,
         files: str,
+        retriever_train_file: str,
         is_train: bool,
         gold_passages_src: str,
         tensorizer: Tensorizer,
         run_preprocessing: bool,
         num_workers: int,
+        debugging: bool = False,
     ):
         super(ExtractiveReaderDataset, self).__init__(
             mode="reader",
             files=files,
+            retriever_train_file=retriever_train_file,
             is_train=is_train,
             gold_passages_src=gold_passages_src,
             tensorizer=tensorizer,
             run_preprocessing=run_preprocessing,
             num_workers=num_workers,
+            debugging=debugging,
         )
 
 

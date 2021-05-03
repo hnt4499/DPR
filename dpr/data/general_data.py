@@ -69,6 +69,30 @@ class DataPassage(object):
         pass
 
 
+class BM25DataPassage(DataPassage):
+    """
+    Data passage container for BM25 passages, with additional `title_score` attribute, which store
+    similarity score of the title of this passage to the question query.
+    """
+    def __init__(
+        self,
+        passage_id=None,
+        text: str = None,
+        title: str = None,
+        score: float = None,
+        title_score: float = None,
+        has_answer: bool = None,
+    ):
+        super(BM25DataPassage, self).__init__(
+            id=passage_id,
+            text=text,
+            title=title,
+            score=score,
+            has_answer=has_answer
+        )
+        self.title_score = title_score
+
+
 class DataSample(object):
     """
     Container to collect all Q&A passages data per single question
@@ -82,6 +106,7 @@ class DataSample(object):
         expanded_answers: List[List[str]],
         positive_passages: List[DataPassage] = [],
         negative_passages: List[DataPassage] = [],
+        bm25_negative_passages: List[BM25DataPassage] = [],
     ):
         self.question = question
         self.answers = answers  # all answers (including expanded set of answers)
@@ -89,13 +114,14 @@ class DataSample(object):
         self.expanded_answers = expanded_answers  # expanded set of answers using heuristics
         self.positive_passages = positive_passages
         self.negative_passages = negative_passages
+        self.bm25_negative_passages = bm25_negative_passages
 
     def on_serialize(self):
-        for passage in self.positive_passages + self.negative_passages:
+        for passage in self.positive_passages + self.negative_passages + self.bm25_negative_passages:
             passage.on_serialize()
 
     def on_deserialize(self):
-        for passage in self.positive_passages + self.negative_passages:
+        for passage in self.positive_passages + self.negative_passages + self.bm25_negative_passages:
             passage.on_deserialize()
 
 
@@ -108,16 +134,22 @@ class GeneralDataset(torch.utils.data.Dataset):
         self,
         mode: str,
         files: str,
+        retriever_train_file: str,
         is_train: bool,
         gold_passages_src: str,
         tensorizer: Tensorizer,
         run_preprocessing: bool,
         num_workers: int,
+        debugging: bool = False,
     ):
         """Initialize general dataset.
 
         :param mode: one of ["retriever", "reader"]. Dataset mode.
         :param files: either path to a single dataset file (*.json) or a glob pattern to preprocessed pickle (*.pkl) files.
+        :param retriever_train_file: path to retriever training file `nq-train.json`, which contains BM25 hard negatives. Note that the `files` json
+            file should have 79168 samples, ~69566 of which contains positives; and this `nq-train.json` should have 58880 samples (the difference
+            is due to inconsistency in data preprocessing). Therefore, ~10k (~=69k-59k) samples of the output of this function will NOT have BM25
+            hard negatives.
         :param is_train: whether this dataset is training set or evaluation set. Different preprocess settings will be
             applied to different types of training sets.
         :param gold_passages_src: path to the gold passage file.
@@ -128,12 +160,14 @@ class GeneralDataset(torch.utils.data.Dataset):
         """
         self.mode = mode  # unused for now
         self.files = files
+        self.retriever_train_file = retriever_train_file
         self.data = []
         self.is_train = is_train
         self.gold_passages_src = gold_passages_src
         self.tensorizer = tensorizer
         self.run_preprocessing = run_preprocessing
         self.num_workers = num_workers
+        self.debugging = debugging
 
     def __getitem__(self, index):
         return self.data[index]
@@ -141,16 +175,13 @@ class GeneralDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.data)
 
-    def load_data(
-        self,
-        debugging: bool = False,
-    ):
+    def load_data(self):
         data_files = glob.glob(self.files)
         if len(data_files) == 0:
             raise RuntimeError("No data files found")
         preprocessed_data_files = self._get_preprocessed_files(data_files)
 
-        if debugging:
+        if self.debugging:
             logger.info("Debugging mode is on. Restricting to at most 2 data files.")
             preprocessed_data_files = preprocessed_data_files[:2]
 
@@ -195,10 +226,12 @@ class GeneralDataset(torch.utils.data.Dataset):
             serialized_files = preprocess_retriever_results(
                 self.is_train,
                 data_files[0],
+                self.retriever_train_file,
                 out_file_prefix,
                 self.gold_passages_src,
                 self.tensorizer,
                 num_workers=self.num_workers,
+                debugging=self.debugging,
             )
             self.tensorizer.set_pad_to_max(True)
 
@@ -215,10 +248,12 @@ class GeneralDataset(torch.utils.data.Dataset):
 def preprocess_retriever_results(
     is_train_set: bool,
     input_file: str,
+    retriever_train_file: str,
     out_file_prefix: str,
     gold_passages_file: str,
     tensorizer: Tensorizer,
     num_workers: int = 8,
+    debugging: bool = False,
 ) -> List[str]:
     """
     Preprocess the dense retriever outputs (or any compatible file format) into the general retriever/reader input data and
@@ -227,6 +262,8 @@ def preprocess_retriever_results(
     in a separate file with name out_file_prefix.{number}.pkl
     :param is_train_set: if the data should be processed for a train set (with applicable settings)
     :param input_file: path to a json file with data to convert
+    :param retriever_train_file: path to reader training file `nq-train.json`, which contains BM25 hard negatives. For more details,
+        see `GeneralDataset`'s documentation.
     :param out_file_prefix: output path prefix.
     :param gold_passages_file: optional path for the 'gold passages & questions' file. Required to get best results for NQ
     :param tensorizer: Tensorizer object for text to model input tensors conversions
@@ -234,10 +271,44 @@ def preprocess_retriever_results(
     :return: path to serialized, preprocessed pickle files
     """
     with open(input_file, "r", encoding="utf-8") as f:
-        samples = json.loads("".join(f.readlines()))
+        samples = json.loads("".join(f.readlines()))  # should contain 79168 samples
+        if debugging:
+            samples = samples[:1000]
     logger.info(
         "Loaded %d questions + retrieval results from %s", len(samples), input_file
     )
+
+    if retriever_train_file is not None:
+        with open(retriever_train_file, "r", encoding="utf-8") as f:
+            retriever_samples = json.load(f)  # should contain 58880 samples
+            if debugging:
+                retriever_samples = retriever_samples[:1000]
+        logger.info(
+            "Loaded %d reader training samples from %s", len(retriever_samples), retriever_train_file
+        )
+
+        # Transfer BM25 hard negatives; note that they should have the same order
+        count_a, count_b = 0, 0
+        len_a, len_b = len(samples), len(retriever_samples)
+
+        while count_a < len_a and count_b < len_b:
+            if samples[count_a]["question"] == retriever_samples[count_b]["question"]:  # match by question
+                samples[count_a]["bm25_hn"] = retriever_samples[count_b]["hard_negative_ctxs"]
+                count_b += 1
+            else:
+                samples[count_a]["bm25_hn"] = []  # empty set
+            count_a += 1
+
+        if count_b != len_b and (not debugging):
+            raise RuntimeError(f"Retriever training data is not traversed thoroughly. Traversed: {count_b}, total length: {len_b}.")
+        if count_a != len_a and (not debugging):
+            logger.warning(f"Reader training data is not traversed thoroughly. Traversed: {count_a}, total length: {len_a}.")
+        del retriever_samples  # release memory
+
+    else:
+        for sample in samples:
+            sample["bm25_hn"] = []  # empty set
+
     workers = multiprocessing.Pool(num_workers)
     ds_size = len(samples)
     step = max(math.ceil(ds_size / num_workers), 1)
@@ -367,7 +438,7 @@ def _preprocess_retriever_data(
         if question in canonical_questions:
             question = canonical_questions[question]
 
-        positive_passages, negative_passages = _select_passages(
+        positive_passages, negative_passages, bm25_hn_passages = _select_passages(
             sample,
             question,
             orig_answers,
@@ -386,6 +457,9 @@ def _preprocess_retriever_data(
         negative_passages = [
             tokenize_all_texts(sample_, question) for sample_ in negative_passages
         ]
+        bm25_hn_passages = [
+            tokenize_all_texts(sample_, question) for sample_ in bm25_hn_passages
+        ]
 
         if is_train_set and len(positive_passages) == 0:
             no_positive_passages += 1
@@ -402,6 +476,7 @@ def _preprocess_retriever_data(
             expanded_answers=expanded_answers,
             positive_passages=positive_passages,
             negative_passages=negative_passages,
+            bm25_negative_passages=bm25_hn_passages,
         )
 
     logger.info("no positive passages samples: %d", no_positive_passages)
@@ -425,6 +500,8 @@ def _select_passages(
     """
 
     ctxs = [DataPassage(**ctx) for ctx in sample["ctxs"]]
+    bm25_hn_ctxs = [BM25DataPassage(**ctx) for ctx in sample["bm25_hn"]]
+
     answers_token_ids = [
         tensorizer.text_to_tensor(a, add_special_tokens=False) for a in all_answers
     ]
@@ -434,13 +511,24 @@ def _select_passages(
         _find_answer_spans(
             tensorizer, ctx, question, all_answers, answers_token_ids,
             warn_if_no_answer=ctx.has_answer,  # warn if originally it contains answer string
+            warn_if_has_answer=(not ctx.has_answer),  # warn if originally it does NOT contain answer string
         )
         for ctx in ctxs
+    ]
+
+    bm25_hn_ctxs: List[BM25DataPassage] = [
+        _find_answer_spans(
+            tensorizer, ctx, question, all_answers, answers_token_ids,
+            warn_if_no_answer=False,
+            warn_if_has_answer=True,  # warn if answer is found in this hard negative
+        )
+        for ctx in bm25_hn_ctxs
     ]
 
     # Filter positives and negatives using distant supervision
     positive_samples = list(filter(lambda ctx: ctx.has_answer, ctxs))
     negative_samples = list(filter(lambda ctx: not ctx.has_answer, ctxs))
+    bm25_hn_samples = list(filter(lambda ctx: not ctx.has_answer, bm25_hn_ctxs))
 
     # Filter unwanted positive passages if training
     if is_train_set:
@@ -481,7 +569,7 @@ def _select_passages(
     else:
         selected_positive_ctxs = positive_samples
 
-    return selected_positive_ctxs, negative_samples
+    return selected_positive_ctxs, negative_samples, bm25_hn_samples
 
 
 def _find_answer_spans(
@@ -491,33 +579,43 @@ def _find_answer_spans(
     answers : List[str],
     answers_token_ids: List[List[int]],
     warn_if_no_answer: bool = False,
+    warn_if_has_answer: bool = False,
 ):
-    if ctx.has_answer:
-        if ctx.passage_token_ids is None:
-            ctx.passage_token_ids = tensorizer.text_to_tensor(
-                ctx.passage_text, add_special_tokens=False
-            )
+    if ctx.passage_token_ids is None:
+        ctx.passage_token_ids = tensorizer.text_to_tensor(
+            ctx.passage_text, add_special_tokens=False
+        )
 
-        answer_spans = [
-            _find_answer_positions(ctx.passage_token_ids, answers_token_ids[i])
-            for i in range(len(answers))
-        ]
+    answer_spans = [
+        _find_answer_positions(ctx.passage_token_ids, answers_token_ids[i])
+        for i in range(len(answers))
+    ]
 
-        # flatten spans list
-        answer_spans = [item for sublist in answer_spans for item in sublist]
-        answers_spans = list(filter(None, answer_spans))
-        ctx.answers_spans = answers_spans
+    # flatten spans list
+    answer_spans = [item for sublist in answer_spans for item in sublist]
+    answers_spans = list(filter(None, answer_spans))
+    ctx.answers_spans = answers_spans
 
-        if len(answers_spans) == 0 and warn_if_no_answer:
-            logger.warning(
-                "No answer found in passage id=%s text=%s, answers=%s, question=%s",
-                ctx.id,
-                ctx.passage_text,
-                answers,
-                question,
-            )
+    if len(answers_spans) == 0 and warn_if_no_answer:
+        logger.warning(
+            "No answer found in passage id=%s text=%s, title=%s, answers=%s, question=%s",
+            ctx.id,
+            ctx.passage_text,
+            ctx.title,
+            answers,
+            question,
+        )
 
-        ctx.has_answer = bool(answers_spans)
+    if len(answers_spans) > 0 and warn_if_has_answer:
+        logger.warning("Answer FOUND in passage id=%s text=%s, title=%s, answers=%s, question=%s",
+            ctx.id,
+            ctx.passage_text,
+            ctx.title,
+            answers,
+            question,
+        )
+
+    ctx.has_answer = bool(answers_spans)
 
     return ctx
 

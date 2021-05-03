@@ -134,16 +134,20 @@ class ReaderTrainer(object):
                 gold_passages_src
             ), "Please specify valid gold_passages_src/gold_passages_src_dev"
 
+        retriever_training_data_src = self.cfg.retriever_training_data_src if is_train else None  # we don't need BM25 hard negative during evaluation
+
         dataset = ExtractiveReaderDataset(
             path,
+            retriever_training_data_src,
             is_train,
             gold_passages_src,
             self.tensorizer,
             run_preprocessing,
             self.cfg.num_workers,
+            debugging=self.debugging,
         )
 
-        dataset.load_data(debugging=self.debugging)
+        dataset.load_data()
 
         iterator = ShardedDataIterator(
             dataset,
