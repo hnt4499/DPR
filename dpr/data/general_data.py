@@ -539,7 +539,12 @@ def _select_passages(
         selected_positive_ctxs: List[DataPassage] = []
         # Get positives that are from gold positive passages
         for ctx in positive_samples:
-            if gold_page_only_positives and _is_from_gold_wiki_page(gold_passage_map, ctx, ctx.title, question):
+            if gold_page_only_positives and _is_from_gold_wiki_page(
+                    gold_passage_map,
+                    ctx,
+                    tensorizer.tensor_to_text(torch.from_numpy(ctx.title_token_ids)),
+                    question
+            ):
                 selected_positive_ctxs.append(ctx)
 
         # Fallback to positive ctx not from gold passages
