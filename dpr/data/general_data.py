@@ -651,8 +651,8 @@ def _select_passages(
         selected_bm25_negative_ctxs = bm25_negative_samples
 
     # Restrict number of BM25 passages
-    selected_bm25_positive_ctxs = selected_bm25_positive_ctxs[cfg.max_bm25_positives]
-    selected_bm25_negative_ctxs = selected_bm25_negative_ctxs[cfg.max_bm25_negatives]
+    selected_bm25_positive_ctxs = selected_bm25_positive_ctxs[:cfg.max_bm25_positives]
+    selected_bm25_negative_ctxs = selected_bm25_negative_ctxs[:cfg.max_bm25_negatives]
 
     return selected_positive_ctxs, selected_negative_ctxs, selected_bm25_positive_ctxs, selected_bm25_negative_ctxs
 
