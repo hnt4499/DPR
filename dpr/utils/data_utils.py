@@ -453,9 +453,9 @@ class Tensorizer(object):
         title: str = None,
         add_special_tokens: bool = True,
         apply_max_len: bool = True,
-    ):
+    ) -> T:
         raise NotImplementedError
-    
+
     def concatenate_inputs(
         self,
         ids: Dict[str, List[int]],
@@ -464,6 +464,12 @@ class Tensorizer(object):
         """
         Concatenate inputs for either retriever or reader model.
         """
+        raise NotImplementedError
+
+    def tensor_to_text(
+        self,
+        tensor: T
+    ) -> str:
         raise NotImplementedError
 
     def get_pair_separator_ids(self) -> T:

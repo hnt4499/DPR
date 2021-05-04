@@ -263,7 +263,7 @@ class HFBertEncoder(BertModel):
         if self.encode_proj:
             return self.encode_proj.out_features
         return self.config.hidden_size
-    
+
     def load_state(self, state_dict: dict):
         load_state_dict_to_model(self, state_dict)
 
@@ -315,7 +315,7 @@ class BertTensorizer(Tensorizer):
             token_ids[-1] = self.tokenizer.sep_token_id
 
         return torch.tensor(token_ids)
-    
+
     def concatenate_inputs(self, ids: Dict[str, List[int]], get_passage_offset: bool = False) -> T:
         """
         Simply concatenate inputs by adding [CLS] at the beginning and [SEP] at between and end.
@@ -354,10 +354,16 @@ class BertTensorizer(Tensorizer):
             ])
             if get_passage_offset:
                 passage_offset = 3 + len(ids["question"]) + len(ids["passage_title"])
-        
+
         if get_passage_offset:
             return torch.from_numpy(token_ids), passage_offset
         return torch.from_numpy(token_ids)
+
+    def tensor_to_text(
+        self,
+        tensor: T
+    ) -> str:
+        return self.tokenizer.convert_tokens_to_string(tensor)
 
     def get_pair_separator_ids(self) -> T:
         return torch.tensor([self.tokenizer.sep_token_id])

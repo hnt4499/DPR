@@ -15,7 +15,7 @@ import logging
 from typing import Tuple, List
 
 from dpr.utils.data_utils import Tensorizer
-from .general_data import DataPassage, DataSample, GeneralDataset
+from .general_data import DataPassage, DataSample, GeneralDataset, TokenizedWikipediaPassages
 
 logger = logging.getLogger()
 
@@ -39,7 +39,7 @@ class ExtractiveReaderDataset(GeneralDataset):
     def __init__(
         self,
         files: str,
-        retriever_train_file: str,
+        wiki_data: TokenizedWikipediaPassages,
         is_train: bool,
         gold_passages_src: str,
         tensorizer: Tensorizer,
@@ -50,7 +50,7 @@ class ExtractiveReaderDataset(GeneralDataset):
         super(ExtractiveReaderDataset, self).__init__(
             mode="reader",
             files=files,
-            retriever_train_file=retriever_train_file,
+            wiki_data=wiki_data,
             is_train=is_train,
             gold_passages_src=gold_passages_src,
             tensorizer=tensorizer,
