@@ -139,8 +139,10 @@ class ReaderTrainer(object):
         if self.wiki_data is None:
             self.wiki_data = TokenizedWikipediaPassages(data_file=self.cfg.wiki_psgs_tokenized)
 
+        bm25_retrieval_results = self.cfg.bm25_retrieval_results if is_train else None
         dataset = ExtractiveReaderDataset(
             path,
+            bm25_retrieval_results,
             self.wiki_data,
             is_train,
             gold_passages_src,

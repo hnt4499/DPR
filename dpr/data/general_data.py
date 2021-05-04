@@ -85,11 +85,13 @@ class DataPassage(object):
         title: str = None,
         score: float = None,
         has_answer: bool = None,
+        is_from_bm25: bool = False,
     ):
 
         self.id = id  # passage ID
         self.is_gold = False  # whether this is exactly a gold passage
         self.is_from_gold = False  # whether this is from the gold passage (or same article as of the gold passage)
+        self.is_from_bm25 = is_from_bm25
 
         # String passage representations; used for double checking only
         self.passage_text = text
@@ -181,6 +183,7 @@ class GeneralDataset(torch.utils.data.Dataset):
         self,
         mode: str,
         files: str,
+        bm25_retrieval_file: str,
         wiki_data: TokenizedWikipediaPassages,
         is_train: bool,
         gold_passages_src: str,
@@ -193,7 +196,8 @@ class GeneralDataset(torch.utils.data.Dataset):
 
         :param mode: one of ["retriever", "reader"]. Dataset mode.
         :param files: either path to a single dataset file (*.json) or a glob pattern to preprocessed pickle (*.pkl) files.
-        :param wiki_psgs_tokenized: glob path to the pre-tokenized wikipedia passages (*.pkl format).
+        :param bm25_retrieval_file: path to the pre-processed BM25 retrieval results.
+        :param wiki_data: pre-tokenized wikipedia passages.
         :param is_train: whether this dataset is training set or evaluation set. Different preprocess settings will be
             applied to different types of training sets.
         :param gold_passages_src: path to the gold passage file.
@@ -204,6 +208,7 @@ class GeneralDataset(torch.utils.data.Dataset):
         """
         self.mode = mode  # unused for now
         self.files = files
+        self.bm25_retrieval_file = bm25_retrieval_file
         self.wiki_data = wiki_data
         self.data = []
         self.is_train = is_train
@@ -270,6 +275,7 @@ class GeneralDataset(torch.utils.data.Dataset):
             serialized_files = preprocess_retriever_results(
                 self.is_train,
                 data_files[0],
+                self.bm25_retrieval_file,
                 self.wiki_data,
                 out_file_prefix,
                 self.gold_passages_src,
@@ -292,6 +298,7 @@ class GeneralDataset(torch.utils.data.Dataset):
 def preprocess_retriever_results(
     is_train_set: bool,
     input_file: str,
+    bm25_retrieval_file: str,
     wiki_data: TokenizedWikipediaPassages,
     out_file_prefix: str,
     gold_passages_file: str,
@@ -307,6 +314,7 @@ def preprocess_retriever_results(
     in a separate file with name out_file_prefix.{number}.pkl
     :param is_train_set: if the data should be processed for a train set (with applicable settings)
     :param input_file: path to a json file with data to convert
+    :param bm25_retrieval_file: path to the pre-processed BM25 retrieval results
     :param wiki_data: pre-tokenized wikipedia passages.
     :param out_file_prefix: output path prefix.
     :param gold_passages_file: optional path for the 'gold passages & questions' file. Required to get best results for NQ
@@ -315,27 +323,41 @@ def preprocess_retriever_results(
     :param double_check: double check whether the pre-tokenized tokens are correct
     :return: path to serialized, preprocessed pickle files
     """
+    # Load dense retriever results
     with open(input_file, "r", encoding="utf-8") as f:
         samples = json.loads("".join(f.readlines()))
+        num_samples_orig = len(samples)
         if debugging:
             samples = samples[:1000]
     logger.info(
         "Loaded %d questions + retrieval results from %s", len(samples), input_file
     )
 
+    # Load BM25 (sparse) retriever results
+    if bm25_retrieval_file is not None:
+        with open(bm25_retrieval_file, "rb") as f:
+            bm25_samples = pickle.load(f)
+            assert len(bm25_samples) == num_samples_orig
+            if debugging:
+                bm25_samples = bm25_samples[:1000]
+    else:
+        bm25_samples = [tuple() for _ in range(len(samples))]
+
     ds_size = len(samples)
     step = max(math.ceil(ds_size / num_workers), 1)
-    chunks = [samples[i : i + step] for i in range(0, ds_size, step)]
-    chunks = [(i, chunks[i]) for i in range(len(chunks))]
+    chunks = [
+        (j, samples[i : i + step], bm25_samples[i: i + step])
+        for j, i in enumerate(range(0, ds_size, step))
+    ]
     logger.info("Split data into %d chunks", len(chunks))
 
     # We only keep first 1000 passage texts of each chunk for double checking
     logger.info("Releasing memory...")
     c = 1000 if double_check else 0
-    for _, chunk in chunks:
-        if c >= len(chunk):
+    for _, samples, _ in chunks:
+        if c >= len(samples):
             continue
-        for sample in chunk[c:]:
+        for sample in samples[c:]:
             for ctx in sample["ctxs"]:
                 del ctx["title"]
                 del ctx["text"]
@@ -363,17 +385,18 @@ def preprocess_retriever_results(
 
 
 def _preprocess_samples_by_chunk(
-    samples: List,
+    samples: Tuple,
     wiki_data: TokenizedWikipediaPassages,
     out_file_prefix: str,
     gold_passages_file: str,
     tensorizer: Tensorizer,
     is_train_set: bool,
 ) -> str:
-    chunk_id, samples = samples
+    chunk_id, samples, bm25_samples = samples
     logger.info("Start batch %d", len(samples))
     iterator = _preprocess_retriever_data(
         samples,
+        bm25_samples,
         wiki_data,
         gold_passages_file,
         tensorizer,
@@ -402,7 +425,7 @@ PreprocessingCfg = collections.namedtuple(
         "gold_page_only_positives",
         "expand_answers",
         "max_bm25_positives",
-        "max_bm25_negative",
+        "max_bm25_negatives",
     ],
 )
 
@@ -412,12 +435,13 @@ DEFAULT_PREPROCESSING_CFG_TRAIN = PreprocessingCfg(
     gold_page_only_positives=True,  # whether positive passages should only be from the gold passages
     expand_answers=True,  # expand the set of answers; see `answers_processing.py`
     max_bm25_positives=10,
-    max_bm25_negative=30,
+    max_bm25_negatives=30,
 )
 
 
 def _preprocess_retriever_data(
     samples: List[Dict],
+    bm25_samples: List[Tuple[Tuple[int, float]]],
     wiki_data: TokenizedWikipediaPassages,
     gold_info_file: Optional[str],
     tensorizer: Tensorizer,
@@ -427,6 +451,8 @@ def _preprocess_retriever_data(
     """
     Converts retriever results into general retriever/reader training data.
     :param samples: samples from the retriever's json file results
+    :param bm25_samples: bm25 retrieval results; list of tuples of tuples of (passage_id, score), where passages of each
+        sample are already sorted by their scores
     :param gold_info_file: optional path for the 'gold passages & questions' file. Required to get best results for NQ
     :param tensorizer: Tensorizer object for text to model input tensors conversions
     :param cfg: PreprocessingCfg object with positive and negative passage selection parameters
@@ -439,8 +465,9 @@ def _preprocess_retriever_data(
 
     no_positive_passages = 0
     positives_from_gold = 0
+    assert len(samples) == len(bm25_samples)
 
-    for sample in samples:
+    for sample, bm25_sample in zip(samples, bm25_samples):
         question = sample["question"]
         if question in canonical_questions:
             question = canonical_questions[question]
@@ -455,9 +482,10 @@ def _preprocess_retriever_data(
             expanded_answers = []
         all_answers = orig_answers + sum(expanded_answers, [])
 
-        positive_passages, negative_passages = _select_passages(
+        positive_passages, negative_passages, bm25_positive_passages, bm25_negative_passages = _select_passages(
             wiki_data,
             sample,
+            bm25_sample,
             question,
             question_token_ids,
             orig_answers,
@@ -465,8 +493,7 @@ def _preprocess_retriever_data(
             all_answers,
             tensorizer,
             gold_passage_map,
-            cfg.gold_page_only_positives,
-            cfg.include_gold_passage,
+            cfg,
             is_train_set,
         )
 
@@ -485,6 +512,8 @@ def _preprocess_retriever_data(
             expanded_answers=expanded_answers,
             positive_passages=positive_passages,
             negative_passages=negative_passages,
+            bm25_positive_passages=bm25_positive_passages,
+            bm25_negative_passages=bm25_negative_passages,
         )
 
     logger.info("no positive passages samples: %d", no_positive_passages)
@@ -494,6 +523,7 @@ def _preprocess_retriever_data(
 def _select_passages(
     wiki_data: TokenizedWikipediaPassages,
     sample: Dict,
+    bm25_sample: Tuple[Tuple[int, float]],
     question: str,
     question_token_ids: np.ndarray,
     answers: List[str],
@@ -501,25 +531,24 @@ def _select_passages(
     all_answers: List[str],
     tensorizer: Tensorizer,
     gold_passage_map: Dict[str, DataPassage],
-    gold_page_only_positives: bool,
-    include_gold_passage: bool,
+    cfg: PreprocessingCfg,
     is_train_set: bool,
-) -> Tuple[List[DataPassage], List[DataPassage]]:
+) -> Tuple[List[DataPassage], List[DataPassage], List[DataPassage], List[DataPassage]]:
     """
     Select and process valid passages for training/evaluation.
     """
-
-    ctxs = [DataPassage(**ctx) for ctx in sample["ctxs"]]
-    ctxs = [
-        _load_tokens_into_ctx(ctx, question_token_ids, wiki_data, tensorizer)
-        for ctx in ctxs
-    ]  # load question, passage title and passage tokens into the context object
-
+    # Tokenize answers
     answers_token_ids: List[np.ndarray] = [
         tensorizer.text_to_tensor(a, add_special_tokens=False).numpy()
         for a in all_answers
     ]
 
+    # Densely retrieved contexts
+    ctxs = [DataPassage(is_from_bm25=False, **ctx) for ctx in sample["ctxs"]]
+    ctxs = [
+        _load_tokens_into_ctx(ctx, question_token_ids, wiki_data, tensorizer)
+        for ctx in ctxs
+    ]  # load question, passage title and passage tokens into the context object
     # Find answer spans for all passages
     ctxs: List[DataPassage] = [
         _find_answer_spans(
@@ -530,39 +559,69 @@ def _select_passages(
         for ctx in ctxs
     ]
 
+    # Sparsely retrieved contexts (BM25)
+    bm25_ctxs = [
+        DataPassage(id=passage_id, score=score, is_from_bm25=True)
+        for passage_id, score in bm25_sample
+    ]
+    bm25_ctxs = [
+        _load_tokens_into_ctx(ctx, question_token_ids, wiki_data, tensorizer)
+        for ctx in bm25_ctxs
+    ]  # load question, passage title and passage tokens into the context object
+    # Find answer spans for all passages
+    bm25_ctxs: List[DataPassage] = [
+        _find_answer_spans(
+            tensorizer, ctx, question, all_answers, answers_token_ids,
+            warn_if_no_answer=False, warn_if_has_answer=False,
+        )
+        for ctx in bm25_ctxs
+    ]
+
     # Filter positives and negatives using distant supervision
     positive_samples = list(filter(lambda ctx: ctx.has_answer, ctxs))
     negative_samples = list(filter(lambda ctx: not ctx.has_answer, ctxs))
+    bm25_positive_samples = list(filter(lambda ctx: ctx.has_answer, bm25_ctxs))
+    bm25_negative_samples = list(filter(lambda ctx: not ctx.has_answer, bm25_ctxs))
 
     # Filter unwanted positive passages if training
     if is_train_set:
 
         # Get positives that are from gold positive passages
-        if gold_page_only_positives:
+        if cfg.gold_page_only_positives:
             selected_positive_ctxs: List[DataPassage] = []
             selected_negative_ctxs: List[DataPassage] = negative_samples
+            selected_bm25_positive_ctxs: List[DataPassage] = []
+            selected_bm25_negative_ctxs: List[DataPassage] = bm25_negative_samples
 
-            for ctx in positive_samples:
-                is_from_gold = _is_from_gold_wiki_page(
-                    gold_passage_map,
-                    ctx,
-                    tensorizer.tensor_to_text(torch.from_numpy(ctx.title_token_ids)),
-                    question
-                )
-                if is_from_gold:
-                    selected_positive_ctxs.append(ctx)
-                else:  # if it has answer but does not come from gold passage, add it to negative ctxs
-                    selected_negative_ctxs.append(ctx)
+            for positives, selected_positives, selected_negatives in \
+                    [(positive_samples, selected_positive_ctxs, selected_negative_ctxs),
+                     (bm25_positive_samples, selected_bm25_positive_ctxs, selected_bm25_negative_ctxs)]:
+
+                for ctx in positives:
+                    is_from_gold = _is_from_gold_wiki_page(
+                        gold_passage_map,
+                        ctx,
+                        tensorizer.tensor_to_text(torch.from_numpy(ctx.title_token_ids)),
+                        question
+                    )
+                    if is_from_gold:
+                        selected_positives.append(ctx)
+                    else:  # if it has answer but does not come from gold passage, add it to negative ctxs
+                        selected_negatives.append(ctx)
         else:
             selected_positive_ctxs = positive_samples
             selected_negative_ctxs = negative_samples
+            selected_bm25_positive_ctxs = bm25_positive_samples
+            selected_bm25_negative_ctxs = bm25_negative_samples
 
         # Fallback to positive ctx not from gold passages
         if len(selected_positive_ctxs) == 0:
             selected_positive_ctxs = positive_samples
+        if len(selected_bm25_positive_ctxs) == 0:
+            selected_bm25_positive_ctxs = bm25_positive_samples
 
         # Optionally include gold passage itself if it is still not in the positives list
-        if include_gold_passage:
+        if cfg.include_gold_passage:
             if question in gold_passage_map:
                 gold_passage = gold_passage_map[question]
                 gold_passage.is_gold = True
@@ -588,8 +647,14 @@ def _select_passages(
     else:
         selected_positive_ctxs = positive_samples
         selected_negative_ctxs = negative_samples
+        selected_bm25_positive_ctxs = bm25_positive_samples
+        selected_bm25_negative_ctxs = bm25_negative_samples
 
-    return selected_positive_ctxs, selected_negative_ctxs
+    # Restrict number of BM25 passages
+    selected_bm25_positive_ctxs = selected_bm25_positive_ctxs[cfg.max_bm25_positives]
+    selected_bm25_negative_ctxs = selected_bm25_negative_ctxs[cfg.max_bm25_negatives]
+
+    return selected_positive_ctxs, selected_negative_ctxs, selected_bm25_positive_ctxs, selected_bm25_negative_ctxs
 
 
 def _load_tokens_into_ctx(

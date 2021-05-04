@@ -39,6 +39,7 @@ class ExtractiveReaderDataset(GeneralDataset):
     def __init__(
         self,
         files: str,
+        bm25_retrieval_file: str,
         wiki_data: TokenizedWikipediaPassages,
         is_train: bool,
         gold_passages_src: str,
@@ -50,6 +51,7 @@ class ExtractiveReaderDataset(GeneralDataset):
         super(ExtractiveReaderDataset, self).__init__(
             mode="reader",
             files=files,
+            bm25_retrieval_file=bm25_retrieval_file,
             wiki_data=wiki_data,
             is_train=is_train,
             gold_passages_src=gold_passages_src,
