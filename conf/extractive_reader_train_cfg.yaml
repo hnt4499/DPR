@@ -52,8 +52,8 @@ gold_passages_src: /data/tuyen/openqa/DPR/downloads/data/gold_passages_info/nq_t
 # File with the original dataset passages (json format)
 gold_passages_src_dev: /data/tuyen/openqa/DPR/downloads/data/gold_passages_info/nq_dev.json
 
-# Retriever training data file for BM25 hard negatives
-retriever_training_data_src: /data/tuyen/openqa/DPR/downloads/data/retriever/nq-train.json
+# Entire tokenized Wikipedia passages (pkl format)
+wiki_psgs_tokenized: /data/tuyen/openqa/DPR/downloads/data/wikipedia_split/psgs_w100_tokenized.pkl.*
 
 # num of threads to pre-process data.
 num_workers: 16

@@ -29,6 +29,7 @@ from typing import List, Tuple
 
 from dpr.data.qa_validation import exact_match_score, f1_score
 from dpr.utils.dist_utils import all_gather_list
+from dpr.data.general_data import TokenizedWikipediaPassages
 from dpr.data.reader_data import (
     ReaderSample,
     get_best_spans,
@@ -100,6 +101,7 @@ class ReaderTrainer(object):
         self.optimizer = optimizer
         self.tensorizer = tensorizer
         self.debugging = getattr(self.cfg, "debugging", False)
+        self.wiki_data = None
         self.dev_iterator = None
         self.start_epoch = 0
         self.start_batch = 0
@@ -134,11 +136,12 @@ class ReaderTrainer(object):
                 gold_passages_src
             ), "Please specify valid gold_passages_src/gold_passages_src_dev"
 
-        retriever_training_data_src = self.cfg.retriever_training_data_src if is_train else None  # we don't need BM25 hard negative during evaluation
+        if self.wiki_data is None:
+            self.wiki_data = TokenizedWikipediaPassages(data_file=self.cfg.wiki_psgs_tokenized)
 
         dataset = ExtractiveReaderDataset(
             path,
-            retriever_training_data_src,
+            self.wiki_data,
             is_train,
             gold_passages_src,
             self.tensorizer,
