@@ -401,7 +401,7 @@ PreprocessingCfg = collections.namedtuple(
         "include_gold_passage",
         "gold_page_only_positives",
         "expand_answers",
-        "max_bm25_posives",
+        "max_bm25_positives",
         "max_bm25_negative",
     ],
 )
@@ -411,7 +411,7 @@ DEFAULT_PREPROCESSING_CFG_TRAIN = PreprocessingCfg(
     include_gold_passage=False,  # whether to include the gold passage itself
     gold_page_only_positives=True,  # whether positive passages should only be from the gold passages
     expand_answers=True,  # expand the set of answers; see `answers_processing.py`
-    max_bm25_posives=10,
+    max_bm25_positives=10,
     max_bm25_negative=30,
 )
 
@@ -536,16 +536,26 @@ def _select_passages(
 
     # Filter unwanted positive passages if training
     if is_train_set:
-        selected_positive_ctxs: List[DataPassage] = []
+
         # Get positives that are from gold positive passages
-        for ctx in positive_samples:
-            if gold_page_only_positives and _is_from_gold_wiki_page(
+        if gold_page_only_positives:
+            selected_positive_ctxs: List[DataPassage] = []
+            selected_negative_ctxs: List[DataPassage] = negative_samples
+
+            for ctx in positive_samples:
+                is_from_gold = _is_from_gold_wiki_page(
                     gold_passage_map,
                     ctx,
                     tensorizer.tensor_to_text(torch.from_numpy(ctx.title_token_ids)),
                     question
-            ):
-                selected_positive_ctxs.append(ctx)
+                )
+                if is_from_gold:
+                    selected_positive_ctxs.append(ctx)
+                else:  # if it has answer but does not come from gold passage, add it to negative ctxs
+                    selected_negative_ctxs.append(ctx)
+        else:
+            selected_positive_ctxs = positive_samples
+            selected_negative_ctxs = negative_samples
 
         # Fallback to positive ctx not from gold passages
         if len(selected_positive_ctxs) == 0:
@@ -577,8 +587,9 @@ def _select_passages(
 
     else:
         selected_positive_ctxs = positive_samples
+        selected_negative_ctxs = negative_samples
 
-    return selected_positive_ctxs, negative_samples
+    return selected_positive_ctxs, selected_negative_ctxs
 
 
 def _load_tokens_into_ctx(
