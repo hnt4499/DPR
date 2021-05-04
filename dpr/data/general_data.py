@@ -594,11 +594,22 @@ def _load_tokens_into_ctx(
         orig_passage_ids = tensorizer.text_to_tensor(
             ctx.passage_text, add_special_tokens=False,
         ).numpy()
-        assert (orig_passage_ids == tokens["passage_token_ids"]).all()
+        if len(orig_passage_ids) != len(tokens["passage_token_ids"]) or \
+                not (orig_passage_ids == tokens["passage_token_ids"]).all():
+            raise ValueError(f"Passage token mismatch: orig: {orig_passage_ids}, "
+                             f"pre-processed: {tokens['passage_token_ids']}")
+
         orig_title_ids = tensorizer.text_to_tensor(
             ctx.title, add_special_tokens=False,
         ).numpy()
-        assert (orig_title_ids == tokens["title_token_ids"]).all()
+        if len(orig_title_ids) != len(tokens["title_token_ids"]) or \
+                not (orig_title_ids == tokens["title_token_ids"]).all():
+            raise ValueError(
+                f"Passage title token mismatch: id: {ctx.id}, orig: {orig_title_ids}, "
+                f"pre-processed: {tokens['title_token_ids']}. If the sequence lengths are different,",
+                f" this might be because the maximum length of the tokenizer is set differently during "
+                f"pre-processing and training."
+            )
 
     ctx.load_tokens(
         question_token_ids=question_token_ids, **tokens

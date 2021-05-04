@@ -277,6 +277,7 @@ class ReaderTrainer(object):
         eval_top_docs = cfg.eval_top_docs
         for i, samples_batch in enumerate(self.dev_iterator.iterate_ds_data()):
             input = create_reader_input(
+                self.wiki_data,
                 self.tensorizer,
                 samples_batch,
                 cfg.passages_per_question_predict,
@@ -384,6 +385,7 @@ class ReaderTrainer(object):
                     torch.cuda.manual_seed_all(cfg.seed + global_step)
 
             input = create_reader_input(
+                self.wiki_data,
                 self.tensorizer,
                 samples_batch,
                 cfg.passages_per_question,

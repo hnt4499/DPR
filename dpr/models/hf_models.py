@@ -363,7 +363,7 @@ class BertTensorizer(Tensorizer):
         self,
         tensor: T
     ) -> str:
-        return self.tokenizer.convert_tokens_to_string(tensor)
+        return self.tokenizer.decode(tensor)
 
     def get_pair_separator_ids(self) -> T:
         return torch.tensor([self.tokenizer.sep_token_id])
