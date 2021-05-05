@@ -16,8 +16,6 @@ import yaml
 import hydra
 import logging
 import os
-import torch
-torch.autograd.set_detect_anomaly(True)
 
 from omegaconf import DictConfig
 
@@ -107,7 +105,6 @@ def main(cfg: DictConfig):
 if __name__ == "__main__":
     logger.info("Sys.argv: %s", sys.argv)
     hydra_formatted_args = []
-    # convert the cli params added by torch.distributed.launch into Hydra format
     for arg in sys.argv:
         if arg.startswith("--"):
             hydra_formatted_args.append(arg[len("--") :])
