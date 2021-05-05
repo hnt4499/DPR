@@ -55,6 +55,9 @@ class TokenizedWikipediaPassages(object):
 
             logger.info(f"Done. Number of passages: {sum(len(shard_data['id']) for shard_data in self.data)}")
 
+    def remove_data(self):
+        self.data = None
+
     def get_tokenized_data(self, id):
         if self.data is None:
             self.load_data()
