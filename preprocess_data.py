@@ -64,14 +64,15 @@ class PreProcessor(object):
 
         bm25_retrieval_results = self.cfg.bm25_retrieval_results if is_train else None
         dataset = GeneralDataset(
-            path,
-            bm25_retrieval_results,
-            self.wiki_data,
-            is_train,
-            gold_passages_src,
-            self.tensorizer,
-            True,
-            self.cfg.num_workers,
+            mode=None,  # not important
+            files=path,
+            bm25_retrieval_file=bm25_retrieval_results,
+            wiki_data=self.wiki_data,
+            is_train=is_train,
+            gold_passages_src=gold_passages_src,
+            tensorizer=self.tensorizer,
+            run_preprocessing=True,
+            num_workers=self.cfg.num_workers,
             debugging=self.debugging,
             load_data=False,
         )
