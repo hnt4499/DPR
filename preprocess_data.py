@@ -22,8 +22,7 @@ torch.autograd.set_detect_anomaly(True)
 from omegaconf import DictConfig
 
 
-from dpr.data.general_data import TokenizedWikipediaPassages
-from dpr.data.reader_data import ExtractiveReaderDataset
+from dpr.data.general_data import GeneralDataset, TokenizedWikipediaPassages
 from dpr.models import init_tenzorizer
 from dpr.options import setup_logger
 
@@ -64,7 +63,7 @@ class PreProcessor(object):
             self.wiki_data = TokenizedWikipediaPassages(data_file=self.cfg.wiki_psgs_tokenized)
 
         bm25_retrieval_results = self.cfg.bm25_retrieval_results if is_train else None
-        dataset = ExtractiveReaderDataset(
+        dataset = GeneralDataset(
             path,
             bm25_retrieval_results,
             self.wiki_data,
@@ -74,6 +73,7 @@ class PreProcessor(object):
             True,
             self.cfg.num_workers,
             debugging=self.debugging,
+            load_data=False,
         )
 
         dataset.load_data()

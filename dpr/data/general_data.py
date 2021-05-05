@@ -194,6 +194,7 @@ class GeneralDataset(torch.utils.data.Dataset):
         run_preprocessing: bool,
         num_workers: int,
         debugging: bool = False,
+        load_data: bool = True,
     ):
         """Initialize general dataset.
 
@@ -208,6 +209,7 @@ class GeneralDataset(torch.utils.data.Dataset):
         :param run_preprocessing: whether to perform preprocessing. Useful for DDP mode, where only one process should do
             preprocessing while other processes wait for its results.
         :param num_workers: number of workers for the preprocessing step.
+        :param load_data: whether to load pre-processes data into memory. Disable this if you want to pre-process data only
         """
         self.mode = mode  # unused for now
         self.files = files
@@ -220,6 +222,7 @@ class GeneralDataset(torch.utils.data.Dataset):
         self.run_preprocessing = run_preprocessing
         self.num_workers = num_workers
         self.debugging = debugging
+        self.load_data_ = load_data
 
     def __getitem__(self, index):
         return self.data[index]
@@ -233,12 +236,13 @@ class GeneralDataset(torch.utils.data.Dataset):
             raise RuntimeError("No data files found")
         preprocessed_data_files = self._get_preprocessed_files(data_files)
 
-        if self.debugging:
-            logger.info("Debugging mode is on. Restricting to at most 2 data files.")
-            preprocessed_data_files = preprocessed_data_files[:2]
+        if self.load_data_:
+            if self.debugging:
+                logger.info("Debugging mode is on. Restricting to at most 2 data files.")
+                preprocessed_data_files = preprocessed_data_files[:2]
 
-        logger.info(f"Reading data files: {preprocessed_data_files}")
-        self.data = read_serialized_data_from_files(preprocessed_data_files)
+            logger.info(f"Reading data files: {preprocessed_data_files}")
+            self.data = read_serialized_data_from_files(preprocessed_data_files)
 
     def _get_preprocessed_files(
         self,
