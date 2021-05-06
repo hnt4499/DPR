@@ -440,7 +440,7 @@ def _preprocess_samples_by_chunk(
     wiki_data: TokenizedWikipediaPassages,
     out_file_prefix: str,
     gold_passages_file: str,
-    gold_passages_processes_file: str,
+    gold_passages_processed_file: str,
     tensorizer: Tensorizer,
     is_train_set: bool,
 ) -> str:
@@ -451,7 +451,7 @@ def _preprocess_samples_by_chunk(
         bm25_samples,
         wiki_data,
         gold_passages_file,
-        gold_passages_processes_file,
+        gold_passages_processed_file,
         tensorizer,
         is_train_set=is_train_set,
     )
