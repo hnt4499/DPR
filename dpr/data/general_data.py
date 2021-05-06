@@ -642,11 +642,14 @@ def _select_passages(
         )  # load question, passage title and passage tokens into the context object
         gold_ctx = _find_answer_spans(
             tensorizer, gold_ctx, question, all_answers, answers_token_ids,
-            warn_if_no_answer=False, raise_if_no_answer=True,
+            warn_if_no_answer=True, raise_if_no_answer=False,
             warn_if_has_answer=False, raise_if_has_answer=False,
             recheck_negatives=False,
         )  # find answer spans for all passages
-        gold_ctxs = [gold_ctx]
+        if gold_ctx.has_answer:
+            gold_ctxs = [gold_ctx]
+        else:
+            gold_ctxs = []
     else:
         gold_ctxs = []
 
@@ -832,7 +835,7 @@ def _find_answer_spans(
     warn_if_has_answer: bool = False,
     raise_if_has_answer: bool = False,
     recheck_negatives: bool = False,
-):
+) -> DataPassage:
     if (not recheck_negatives) and (not ctx.has_answer):
         return ctx
 
