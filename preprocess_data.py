@@ -48,6 +48,7 @@ class PreProcessor(object):
         is_train: bool,
     ) -> None:
 
+        # Original, raw gold passages
         gold_passages_src = self.cfg.gold_passages_src
         if gold_passages_src:
             if not is_train:
@@ -56,6 +57,10 @@ class PreProcessor(object):
             assert os.path.exists(
                 gold_passages_src
             ), "Please specify valid gold_passages_src/gold_passages_src_dev"
+
+        # Processed, 100-word split gold passages
+        gold_passages_processed = (self.cfg.gold_passages_processed if is_train
+                                   else self.cfg.gold_passages_processed_dev)
 
         if self.wiki_data is None:
             self.wiki_data = TokenizedWikipediaPassages(data_file=self.cfg.wiki_psgs_tokenized)
@@ -68,6 +73,7 @@ class PreProcessor(object):
             wiki_data=self.wiki_data,
             is_train=is_train,
             gold_passages_src=gold_passages_src,
+            gold_passages_processed=gold_passages_processed,
             tensorizer=self.tensorizer,
             run_preprocessing=True,
             num_workers=self.cfg.num_workers,

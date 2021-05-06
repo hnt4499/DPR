@@ -8,11 +8,37 @@ do_lower_case: True
 
 seed: 42
 
+# ========================================== TRAIN ==================================================
+
 # glob expression for train data files
 train_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new/train.json
 
+# File with the original train dataset passages (json format)
+gold_passages_src: /data/tuyen/openqa/DPR/downloads/data/gold_passages_info/nq_train.json
+
+# File with the preprocessed (i.e., 100-word) gold passages
+gold_passages_processed: /data/tuyen/openqa/DPR/downloads/data/retriever/nq-train.gold.pkl
+
+# BM25 retrieval results (pre-processed; for training data only; pkl format)
+bm25_retrieval_results: /data/tuyen/openqa/DPR/downloads/data/retriever/nq-train.bm25.top100.pkl
+
+# =========================================== DEV ===================================================
+
 # glob expression for dev data files
 dev_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new/dev.json
+
+# File with the original dataset passages (json format)
+gold_passages_src_dev: /data/tuyen/openqa/DPR/downloads/data/gold_passages_info/nq_dev.json
+
+# File with the preprocessed (i.e., 100-word) gold passages
+gold_passages_processed_dev: /data/tuyen/openqa/DPR/downloads/data/retriever/nq-dev.gold.pkl
+
+# ========================================== GENERAL ================================================
+
+# Entire tokenized Wikipedia passages (pkl format)
+wiki_psgs_tokenized: /data/tuyen/openqa/DPR/downloads/data/wikipedia_split/psgs_w100_tokenized.pkl.*
+
+# ===================================================================================================
 
 # Total amount of positive and negative passages per question
 passages_per_question: 8
@@ -22,19 +48,6 @@ passages_per_question_predict: 60
 
 # The output directory where the model checkpoints will be written to
 output_dir: checkpoints/
-
-
-# File with the original train dataset passages (json format)
-gold_passages_src: /data/tuyen/openqa/DPR/downloads/data/gold_passages_info/nq_train.json
-
-# File with the original dataset passages (json format)
-gold_passages_src_dev: /data/tuyen/openqa/DPR/downloads/data/gold_passages_info/nq_dev.json
-
-# Entire tokenized Wikipedia passages (pkl format)
-wiki_psgs_tokenized: /data/tuyen/openqa/DPR/downloads/data/wikipedia_split/psgs_w100_tokenized.pkl.*
-
-# BM25 retrieval results (pre-processed; pkl format)
-bm25_retrieval_results: /data/tuyen/openqa/DPR/downloads/data/retriever/nq-train.bm25.top100.pkl
 
 # num of threads to pre-process data.
 num_workers: 4
