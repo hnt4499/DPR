@@ -91,7 +91,7 @@ class DataPassage(object):
         is_from_bm25: bool = False,
     ):
 
-        self.id = id  # passage ID
+        self.id = int(id)  # passage ID
         self.is_gold = False  # whether this is exactly a gold passage
         self.is_from_gold = False  # whether this is from the gold passage (or same article as of the gold passage)
         self.is_from_bm25 = is_from_bm25
@@ -157,6 +157,8 @@ class DataSample(object):
         answers: List[str],  # all answers
         orig_answers: List[str],
         expanded_answers: List[List[str]],
+        # Gold
+        gold_passages: List[DataPassage] = [],
         # Dense
         positive_passages: List[DataPassage] = [],
         distantly_positive_passages: List[DataPassage] = [],
@@ -171,6 +173,9 @@ class DataSample(object):
         self.orig_answers = orig_answers  # original set of answers
         self.expanded_answers = expanded_answers  # expanded set of answers using heuristics
 
+        # Gold
+        self.gold_passages = gold_passages
+
         # Dense
         self.positive_passages = positive_passages
         self.distantly_positive_passages = distantly_positive_passages
@@ -182,6 +187,8 @@ class DataSample(object):
         self.bm25_negative_passages = bm25_negative_passages
 
         self.container = [
+            # Gold
+            self.gold_passages,
             # Dense
             self.positive_passages,
             self.distantly_positive_passages,
@@ -216,6 +223,7 @@ class GeneralDataset(torch.utils.data.Dataset):
         wiki_data: TokenizedWikipediaPassages,
         is_train: bool,
         gold_passages_src: str,
+        gold_passages_processed: str,
         tensorizer: Tensorizer,
         run_preprocessing: bool,
         num_workers: int,
@@ -244,6 +252,7 @@ class GeneralDataset(torch.utils.data.Dataset):
         self.data = []
         self.is_train = is_train
         self.gold_passages_src = gold_passages_src
+        self.gold_passages_processed = gold_passages_processed
         self.tensorizer = tensorizer
         self.run_preprocessing = run_preprocessing
         self.num_workers = num_workers
@@ -312,6 +321,7 @@ class GeneralDataset(torch.utils.data.Dataset):
                 self.wiki_data,
                 out_file_prefix,
                 self.gold_passages_src,
+                self.gold_passages_processed,
                 self.tensorizer,
                 num_workers=self.num_workers,
                 debugging=self.debugging,
@@ -335,6 +345,7 @@ def preprocess_retriever_results(
     wiki_data: TokenizedWikipediaPassages,
     out_file_prefix: str,
     gold_passages_file: str,
+    gold_passages_processed_file: str,
     tensorizer: Tensorizer,
     num_workers: int = 8,
     double_check: bool = True,
@@ -351,6 +362,9 @@ def preprocess_retriever_results(
     :param wiki_data: pre-tokenized wikipedia passages.
     :param out_file_prefix: output path prefix.
     :param gold_passages_file: optional path for the 'gold passages & questions' file. Required to get best results for NQ
+    :param gold_passages_processed_file: path to the preprocessed gold passages pickle file. Unlike `gold_passages_file` which
+        contains original gold passages, this file should contain processed, matched, 100-word split passages that match
+        with the original gold passages.
     :param tensorizer: Tensorizer object for text to model input tensors conversions
     :param num_workers: the number of parallel processes for conversion
     :param double_check: double check whether the pre-tokenized tokens are correct
@@ -407,6 +421,7 @@ def preprocess_retriever_results(
         wiki_data=wiki_data,
         out_file_prefix=out_file_prefix,
         gold_passages_file=gold_passages_file,
+        gold_passages_processed_file=gold_passages_processed_file,
         tensorizer=tensorizer,
         is_train_set=is_train_set,
     )
@@ -425,6 +440,7 @@ def _preprocess_samples_by_chunk(
     wiki_data: TokenizedWikipediaPassages,
     out_file_prefix: str,
     gold_passages_file: str,
+    gold_passages_processes_file: str,
     tensorizer: Tensorizer,
     is_train_set: bool,
 ) -> str:
@@ -435,6 +451,7 @@ def _preprocess_samples_by_chunk(
         bm25_samples,
         wiki_data,
         gold_passages_file,
+        gold_passages_processes_file,
         tensorizer,
         is_train_set=is_train_set,
     )
@@ -493,6 +510,7 @@ def _preprocess_retriever_data(
     bm25_samples: List[Tuple[Tuple[int, float]]],
     wiki_data: TokenizedWikipediaPassages,
     gold_info_file: Optional[str],
+    gold_info_processed_file: str,
     tensorizer: Tensorizer,
     cfg: PreprocessingCfg = DEFAULT_PREPROCESSING_CFG_TRAIN,
     is_train_set: bool = True,
@@ -503,6 +521,9 @@ def _preprocess_retriever_data(
     :param bm25_samples: bm25 retrieval results; list of tuples of tuples of (passage_id, score), where passages of each
         sample are already sorted by their scores
     :param gold_info_file: optional path for the 'gold passages & questions' file. Required to get best results for NQ
+    :param gold_info_processed_file: path to the preprocessed gold passages pickle file. Unlike `gold_passages_file` which
+        contains original gold passages, this file should contain processed, matched, 100-word split passages that match
+        with the original gold passages.
     :param tensorizer: Tensorizer object for text to model input tensors conversions
     :param cfg: PreprocessingCfg object with positive and negative passage selection parameters
     :param is_train_set: if the data should be processed as a train set
@@ -511,9 +532,11 @@ def _preprocess_retriever_data(
     gold_passage_map, canonical_questions = (
         _get_gold_ctx_dict(gold_info_file) if gold_info_file is not None else ({}, {})
     )
+    processed_gold_passage_map = _get_processed_gold_ctx_dict(gold_info_processed_file)
 
-    no_positive_passages = 0
-    positives_from_gold = 0
+    number_no_positive_samples = 0
+    number_samples_from_gold = 0
+    number_samples_with_gold = 0
     assert len(samples) == len(bm25_samples)
 
     for sample, bm25_sample in zip(samples, bm25_samples):
@@ -542,25 +565,32 @@ def _preprocess_retriever_data(
             all_answers,
             tensorizer,
             gold_passage_map,
+            processed_gold_passage_map,
             cfg,
             is_train_set,
         )
-        positive_passages, negative_passages, distantly_positive_passages = passages[:3]
-        bm25_positive_passages, bm25_negative_passages, bm25_distantly_positive_passages = passages[3:]
+        gold_passages = passages[0]
+        positive_passages, negative_passages, distantly_positive_passages = passages[1:4]
+        bm25_positive_passages, bm25_negative_passages, bm25_distantly_positive_passages = passages[4:]
 
         if is_train_set and len(positive_passages) == 0:
-            no_positive_passages += 1
+            number_no_positive_samples += 1
             if cfg.skip_no_positives:
                 continue
 
-        if next(iter(ctx for ctx in positive_passages if ctx.score == -1), None):
-            positives_from_gold += 1
+        if any(ctx for ctx in positive_passages if ctx.is_from_gold):
+            number_samples_from_gold += 1
+
+        if len(gold_passages) > 0:
+            number_samples_with_gold += 1
 
         yield DataSample(
             question,
             answers=all_answers,
             orig_answers=orig_answers,
             expanded_answers=expanded_answers,
+            # Gold
+            gold_passages=gold_passages,
             # Dense
             positive_passages=positive_passages,
             distantly_positive_passages=distantly_positive_passages,
@@ -571,8 +601,10 @@ def _preprocess_retriever_data(
             bm25_negative_passages=bm25_negative_passages,
         )
 
-    logger.info("no positive passages samples: %d", no_positive_passages)
-    logger.info("positive passages from gold samples: %d", positives_from_gold)
+    logger.info(f"Number of samples whose at least one positive passage is "
+                f"from the same article as the gold passage: {number_samples_from_gold}")
+    logger.info(f"Number of samples whose gold passage is available: {number_samples_with_gold}")
+    logger.info(f"Number of samples with no positive passages: {number_no_positive_samples}")
 
 
 def _select_passages(
@@ -586,9 +618,13 @@ def _select_passages(
     all_answers: List[str],
     tensorizer: Tensorizer,
     gold_passage_map: Dict[str, DataPassage],
+    processed_gold_passage_map: Dict[str, DataPassage],
     cfg: PreprocessingCfg,
     is_train_set: bool,
-) -> Tuple[List[DataPassage], List[DataPassage], List[DataPassage], List[DataPassage]]:
+) -> Tuple[
+    List[DataPassage], List[DataPassage], List[DataPassage], List[DataPassage],
+    List[DataPassage], List[DataPassage], List[DataPassage]
+]:
     """
     Select and process valid passages for training/evaluation.
     """
@@ -597,6 +633,22 @@ def _select_passages(
         tensorizer.text_to_tensor(a, add_special_tokens=False).numpy()
         for a in all_answers
     ]
+
+    # Gold context
+    if question in processed_gold_passage_map:
+        gold_ctx = processed_gold_passage_map[question]
+        gold_ctx = _load_tokens_into_ctx(
+            gold_ctx, question_token_ids, wiki_data, tensorizer
+        )  # load question, passage title and passage tokens into the context object
+        gold_ctx = _find_answer_spans(
+            tensorizer, gold_ctx, question, all_answers, answers_token_ids,
+            warn_if_no_answer=False, raise_if_no_answer=True,
+            warn_if_has_answer=False, raise_if_has_answer=False,
+            recheck_negatives=False,
+        )  # find answer spans for all passages
+        gold_ctxs = [gold_ctx]
+    else:
+        gold_ctxs = []
 
     # Densely retrieved contexts
     ctxs = [DataPassage(is_from_bm25=False, **ctx) for ctx in sample["ctxs"]]
@@ -719,6 +771,7 @@ def _select_passages(
     selected_bm25_negative_ctxs = selected_bm25_negative_ctxs[:cfg.max_bm25_negatives]
 
     return (
+        gold_ctxs,
         selected_positive_ctxs, selected_negative_ctxs, distantly_positive_samples,
         selected_bm25_positive_ctxs, selected_bm25_negative_ctxs, bm25_distantly_positive_samples,
     )
@@ -775,7 +828,9 @@ def _find_answer_spans(
     answers : List[str],
     answers_token_ids: List[List[int]],
     warn_if_no_answer: bool = False,
+    raise_if_no_answer: bool = False,
     warn_if_has_answer: bool = False,
+    raise_if_has_answer: bool = False,
     recheck_negatives: bool = False,
 ):
     if (not recheck_negatives) and (not ctx.has_answer):
@@ -791,24 +846,31 @@ def _find_answer_spans(
     answers_spans = list(filter(None, answer_spans))
     ctx.answers_spans = answers_spans
 
-    if len(answers_spans) == 0 and warn_if_no_answer:
-        logger.warning(
-            "No answer found in passage id=%s text=%s, title=%s, answers=%s, question=%s",
-            ctx.id,
-            tensorizer.tensor_to_text(torch.from_numpy(ctx.passage_token_ids)),
-            tensorizer.tensor_to_text(torch.from_numpy(ctx.title_token_ids)),
-            answers,
-            question,
+    if len(answers_spans) == 0 and (warn_if_no_answer or raise_if_no_answer):
+        passage_text = tensorizer.tensor_to_text(torch.from_numpy(ctx.passage_token_ids))
+        passage_title = tensorizer.tensor_to_text(torch.from_numpy(ctx.title_token_ids))
+        message = (
+            f"No answer found in passage id={ctx.id} text={passage_text}, title={passage_title}, "
+            f"answers={answers}, question={question}"
         )
 
-    if len(answers_spans) > 0 and warn_if_has_answer:
-        logger.warning("Answer FOUND in passage id=%s text=%s, title=%s, answers=%s, question=%s",
-            ctx.id,
-            tensorizer.tensor_to_text(torch.from_numpy(ctx.passage_token_ids)),
-            tensorizer.tensor_to_text(torch.from_numpy(ctx.title_token_ids)),
-            answers,
-            question,
+        if raise_if_no_answer:
+            raise ValueError(message)
+        else:
+            logger.warning(message)
+
+    if len(answers_spans) > 0 and (warn_if_has_answer or raise_if_has_answer):
+        passage_text = tensorizer.tensor_to_text(torch.from_numpy(ctx.passage_token_ids))
+        passage_title = tensorizer.tensor_to_text(torch.from_numpy(ctx.title_token_ids))
+        message = (
+            f"Answer FOUND in passage id={ctx.id} text={passage_text}, title={passage_title}, "
+            f"answers={answers}, question={question}"
         )
+
+        if raise_if_has_answer:
+            raise ValueError(message)
+        else:
+            logger.warning(message)
 
     ctx.has_answer = bool(answers_spans)
 
@@ -866,6 +928,38 @@ def _get_gold_ctx_dict(file: str) -> Tuple[Dict[str, DataPassage], Dict[str, str
         gold_passage_infos[question] = rp
         gold_passage_infos[question_from_tokens] = rp
     return gold_passage_infos, original_questions
+
+
+def _get_processed_gold_ctx_dict(file: str) -> Dict[str, DataPassage]:
+    gold_passage_infos: Dict[str, DataPassage] = (
+        {}
+    )
+
+    with open(file, "rb") as f:
+        logger.info("Reading file %s" % file)
+        data: List[Tuple[str, int]] = pickle.load(f)
+
+    for question, gold_passage_id in data:
+        if question in gold_passage_infos:
+            logger.info(f"Duplicate gold info: question: '{question}', gold passage IDs: "
+                        f"{gold_passage_infos[question]} and {gold_passage_id}.")
+            if gold_passage_infos[question] != gold_passage_id:
+                logger.warning(
+                    f"Each question should have only one unique gold passage; found at least 2: "
+                    f"{gold_passage_infos[question]} and {gold_passage_id}. Keeping only the first appearance."
+                )
+
+        else:
+            passage = DataPassage(
+                id=gold_passage_id,
+                score=1000,  # follow DPR's original data convention
+                has_answer=True,
+                is_from_bm25=False,
+            )
+            passage.is_gold = True
+            gold_passage_infos[question] = passage
+
+    return gold_passage_infos
 
 
 def _is_from_gold_wiki_page(
