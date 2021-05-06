@@ -545,8 +545,8 @@ def _preprocess_retriever_data(
             cfg,
             is_train_set,
         )
-        positive_passages, distantly_positive_passages, negative_passages = passages[:3]
-        bm25_positive_passages, bm25_distantly_positive_passages, bm25_negative_passages = passages[3:]
+        positive_passages, negative_passages, distantly_positive_passages = passages[:3]
+        bm25_positive_passages, bm25_negative_passages, bm25_distantly_positive_passages = passages[3:]
 
         if is_train_set and len(positive_passages) == 0:
             no_positive_passages += 1
