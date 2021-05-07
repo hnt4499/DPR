@@ -101,7 +101,7 @@ class DataPassage(object):
         self.title = title
 
         # Other information
-        self.score = score
+        self.score = float(score)
         self.has_answer = has_answer
         self.answers_spans = None
 
@@ -540,9 +540,15 @@ def _preprocess_retriever_data(
     assert len(samples) == len(bm25_samples)
 
     for sample, bm25_sample in zip(samples, bm25_samples):
-        question = sample["question"]
-        if question in canonical_questions:
-            question = canonical_questions[question]
+        # Refer to `_get_gold_ctx_dict` for why we need to distinguish between two types of questions
+        # Here `processed_question` refer to tokenized questions, where `question` refer to
+        # canonical questions.
+        processed_question = sample["question"]
+        if processed_question in canonical_questions:
+            question = canonical_questions[processed_question]
+        else:
+            question = processed_question
+
         question_token_ids: np.ndarray = tensorizer.text_to_tensor(
             question, add_special_tokens=False,
         ).numpy()
@@ -559,6 +565,7 @@ def _preprocess_retriever_data(
             sample,
             bm25_sample,
             question,
+            processed_question,
             question_token_ids,
             orig_answers,
             expanded_answers,
@@ -612,6 +619,7 @@ def _select_passages(
     sample: Dict,
     bm25_sample: Tuple[Tuple[int, float]],
     question: str,
+    processed_question: str,
     question_token_ids: np.ndarray,
     answers: List[str],
     expanded_answers: List[List[str]],
@@ -634,9 +642,14 @@ def _select_passages(
         for a in all_answers
     ]
 
-    # Gold context
-    if question in processed_gold_passage_map:
-        gold_ctx = processed_gold_passage_map[question]
+    # Gold context; we want to cover more gold passages, that's why we are matching both
+    # `processed_question` and `question` (canonical question).
+    if question in processed_gold_passage_map or processed_question in processed_gold_passage_map:
+        if question in processed_gold_passage_map:
+            gold_ctx = processed_gold_passage_map[question]
+        else:
+            gold_ctx = processed_gold_passage_map[processed_question]
+
         gold_ctx = _load_tokens_into_ctx(
             gold_ctx, question_token_ids, wiki_data, tensorizer
         )  # load question, passage title and passage tokens into the context object
