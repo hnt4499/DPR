@@ -67,7 +67,6 @@ class PreProcessor(object):
 
         bm25_retrieval_results = self.cfg.bm25_retrieval_results if is_train else None
         dataset = GeneralDataset(
-            mode=None,  # not important
             files=path,
             bm25_retrieval_file=bm25_retrieval_results,
             wiki_data=self.wiki_data,
