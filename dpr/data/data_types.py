@@ -2,7 +2,6 @@
 Definition of all data types used in training.
 """
 
-from _typeshed import NoneType
 import collections
 from typing import List
 
@@ -39,7 +38,7 @@ class DataPassage(object):
         self.title = title
 
         # Other information
-        self.score = float(score) if not isinstance(score, NoneType) else score
+        self.score = float(score) if score is not None else score
         self.has_answer = has_answer
         self.answers_spans = None
 
