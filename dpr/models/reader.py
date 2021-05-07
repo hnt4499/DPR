@@ -9,7 +9,6 @@
 The reader model code + its utilities (loss computation and input batch tensor generator)
 """
 
-import collections
 import logging
 from typing import List
 
@@ -20,13 +19,11 @@ from torch import Tensor as T
 from torch.nn import CrossEntropyLoss
 
 from dpr.data.general_data import TokenizedWikipediaPassages
-from dpr.data.reader_data import ReaderSample, ReaderPassage
+from dpr.data.data_types import ReaderSample, ReaderPassage, ReaderBatch
 from dpr.utils.model_utils import init_weights, CheckpointState, load_state_dict_to_model
 from dpr.utils.data_utils import Tensorizer
 
 logger = logging.getLogger()
-
-ReaderBatch = collections.namedtuple('ReaderBatch', ['input_ids', 'start_positions', 'end_positions', 'answers_mask'])
 
 
 class Reader(nn.Module):
@@ -229,7 +226,7 @@ def create_reader_input(
     shuffle: bool,
 ) -> ReaderBatch:
     """
-    Creates a reader batch instance out of a list of ReaderSample-s
+    Creates a reader batch instance out of a list of ReaderSample-s. This is compatible with `GeneralDataset`.
     :param wiki_data: all tokenized wikipedia passages
     :param tensorizer: initialized tensorizer (which contains the tokenizer)
     :param samples: list of samples to create the batch for
@@ -250,9 +247,11 @@ def create_reader_input(
     for sample in samples:
         positive_ctxs = sample.positive_passages if is_train else []
         negative_ctxs = sample.negative_passages if is_train else sample.positive_passages + sample.negative_passages
+        question_token_ids = sample.question_token_ids
 
         sample_tensors = _create_question_passages_tensors(
             wiki_data,
+            question_token_ids,
             tensorizer,
             positive_ctxs,
             negative_ctxs,
@@ -331,6 +330,7 @@ def _get_positive_idx(positives: List[ReaderPassage], max_len: int, is_random: b
 
 def _create_question_passages_tensors(
     wiki_data: TokenizedWikipediaPassages,
+    question_token_ids: np.ndarray,
     tensorizer: Tensorizer,
     positives: List[ReaderPassage],
     negatives: List[ReaderPassage],
@@ -354,6 +354,7 @@ def _create_question_passages_tensors(
         if getattr(positive, "sequence_ids", None) is None:
             # Load in passage tokens and title tokens
             positive.load_tokens(
+                question_token_ids=question_token_ids,
                 **wiki_data.get_tokenized_data(int(positive.id))
             )
             sequence_ids, passage_offset = tensorizer.concatenate_inputs({
@@ -409,6 +410,7 @@ def _create_question_passages_tensors(
         if getattr(negative, "sequence_ids", None) is None:
             # Load in passage tokens and title tokens
             negative.load_tokens(
+                question_token_ids=question_token_ids,
                 **wiki_data.get_tokenized_data(int(negative.id))
             )
             # Concatenate input tokens

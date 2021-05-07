@@ -18,8 +18,9 @@ from torch import Tensor as T
 from tqdm import tqdm
 import numpy as np
 
+from dpr.data.data_types import DataPassage, DataSample
 from dpr.utils.data_utils import Tensorizer, read_serialized_data_from_files
-from .answers_processing import get_expanded_answer
+from dpr.data.answers_processing import get_expanded_answer
 
 logger = logging.getLogger()
 
@@ -76,140 +77,6 @@ class TokenizedWikipediaPassages(object):
         return {"passage_token_ids": text, "title_token_ids": title}
 
 
-class DataPassage(object):
-    """
-    Container to collect and cache all Q&A passages related attributes before generating the retriever/reader input
-    """
-
-    def __init__(
-        self,
-        id: str = None,
-        text: str = None,
-        title: str = None,
-        score: float = None,
-        has_answer: bool = None,
-        is_from_bm25: bool = False,
-    ):
-
-        self.id = int(id)  # passage ID
-        self.is_gold = False  # whether this is exactly a gold passage
-        self.is_from_gold = False  # whether this is from the gold passage (or same article as of the gold passage)
-        self.is_from_bm25 = is_from_bm25
-
-        # String passage representations; used for double checking only
-        self.passage_text = text
-        self.title = title
-
-        # Other information
-        self.score = float(score)
-        self.has_answer = has_answer
-        self.answers_spans = None
-
-        # Token ids
-        self.question_token_ids = None
-        self.title_token_ids = None
-        self.passage_token_ids = None
-
-        # For backward compatibility
-        self.sequence_ids = None
-        self.passage_offset = None
-
-    def load_tokens(
-        self,
-        question_token_ids: np.ndarray = None,
-        title_token_ids: np.ndarray = None,
-        passage_token_ids: np.ndarray = None
-    ):
-        """
-        All these arrays are expected to be numpy array.
-        """
-        if question_token_ids is not None:
-            self.question_token_ids = question_token_ids.copy()
-        if title_token_ids is not None:
-            self.title_token_ids = title_token_ids.copy()
-        if passage_token_ids is not None:
-            self.passage_token_ids = passage_token_ids.copy()
-
-    def on_serialize(self, remove_tokens=True):
-        self.passage_text = None
-        self.title = None
-
-        # We only keep question token ids; the other two can be retrieved from the "unified" dataset
-        if remove_tokens:
-            self.title_token_ids = None
-            self.passage_token_ids = None
-        if isinstance(self.question_token_ids, T):
-            self.question_token_ids = self.question_token_ids.numpy()
-
-    def on_deserialize(self):
-        # Do nothing
-        pass
-
-
-class DataSample(object):
-    """
-    Container to collect all Q&A passages data per single question
-    """
-
-    def __init__(
-        self,
-        question: str,
-        answers: List[str],  # all answers
-        orig_answers: List[str],
-        expanded_answers: List[List[str]],
-        # Gold
-        gold_passages: List[DataPassage] = [],
-        # Dense
-        positive_passages: List[DataPassage] = [],
-        distantly_positive_passages: List[DataPassage] = [],
-        negative_passages: List[DataPassage] = [],
-        # Sparse
-        bm25_positive_passages: List[DataPassage] = [],
-        bm25_distantly_positive_passages: List[DataPassage] = [],
-        bm25_negative_passages: List[DataPassage] = [],
-    ):
-        self.question = question
-        self.answers = answers  # all answers (including expanded set of answers)
-        self.orig_answers = orig_answers  # original set of answers
-        self.expanded_answers = expanded_answers  # expanded set of answers using heuristics
-
-        # Gold
-        self.gold_passages = gold_passages
-
-        # Dense
-        self.positive_passages = positive_passages
-        self.distantly_positive_passages = distantly_positive_passages
-        self.negative_passages = negative_passages
-
-        # Sparse
-        self.bm25_positive_passages = bm25_positive_passages
-        self.bm25_distantly_positive_passages = bm25_distantly_positive_passages
-        self.bm25_negative_passages = bm25_negative_passages
-
-        self.container = [
-            # Gold
-            self.gold_passages,
-            # Dense
-            self.positive_passages,
-            self.distantly_positive_passages,
-            self.negative_passages,
-            # Sparse
-            self.bm25_positive_passages,
-            self.bm25_distantly_positive_passages,
-            self.bm25_negative_passages,
-        ]
-
-    def on_serialize(self):
-        for passages in self.container:
-            for passage in passages:
-                passage.on_serialize()
-
-    def on_deserialize(self):
-        for passages in self.container:
-            for passage in passages:
-                passage.on_deserialize()
-
-
 class GeneralDataset(torch.utils.data.Dataset):
     """
     General-purpose dataset for both retriever (biencoder) and reader. Input data is expected to be output of a
@@ -217,7 +84,6 @@ class GeneralDataset(torch.utils.data.Dataset):
     """
     def __init__(
         self,
-        mode: str,
         files: str,
         bm25_retrieval_file: str,
         wiki_data: TokenizedWikipediaPassages,
@@ -245,11 +111,10 @@ class GeneralDataset(torch.utils.data.Dataset):
         :param num_workers: number of workers for the preprocessing step.
         :param load_data: whether to load pre-processes data into memory. Disable this if you want to pre-process data only
         """
-        self.mode = mode  # unused for now
         self.files = files
         self.bm25_retrieval_file = bm25_retrieval_file
         self.wiki_data = wiki_data
-        self.data = []
+        self.data: List[DataSample] = []
         self.is_train = is_train
         self.gold_passages_src = gold_passages_src
         self.gold_passages_processed = gold_passages_processed
@@ -259,7 +124,7 @@ class GeneralDataset(torch.utils.data.Dataset):
         self.debugging = debugging
         self.load_data_ = load_data
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: int) -> DataSample:
         return self.data[index]
 
     def __len__(self):
@@ -490,6 +355,8 @@ PreprocessingCfg = collections.namedtuple(
         # negatives. This option is only applicable when `gold_page_only_positives` is set to True.
         # Note that instead of discarding such passages, it will instead be stored in `distantly_positive_passages`.
         "should_negatives_contain_answer",
+        # In retriever (NOT reader) data preparing step, question (but NOT passages) are normalized
+        "normalize_questions",
     ],
 )
 
@@ -502,6 +369,7 @@ DEFAULT_PREPROCESSING_CFG_TRAIN = PreprocessingCfg(
     max_bm25_negatives=30,
     recheck_negatives=False,  # see description above
     should_negatives_contain_answer=False,  # see description above
+    normalize_questions=True,  # see description above
 )
 
 
@@ -550,7 +418,8 @@ def _preprocess_retriever_data(
             question = processed_question
 
         question_token_ids: np.ndarray = tensorizer.text_to_tensor(
-            question, add_special_tokens=False,
+            normalize_question(question) if cfg.normalize_questions else question,
+            add_special_tokens=False,
         ).numpy()
 
         orig_answers = sample["answers"]
@@ -593,6 +462,7 @@ def _preprocess_retriever_data(
 
         yield DataSample(
             question,
+            question_token_ids=question_token_ids,
             answers=all_answers,
             orig_answers=orig_answers,
             expanded_answers=expanded_answers,
@@ -906,7 +776,7 @@ def _find_answer_positions(ctx_ids: np.ndarray, answer: np.ndarray) -> List[Tupl
 def _get_gold_ctx_dict(file: str) -> Tuple[Dict[str, DataPassage], Dict[str, str]]:
     gold_passage_infos = (
         {}
-    )  # question|question_tokens -> ReaderPassage (with title and gold ctx)
+    )  # question|question_tokens -> DataPassage (with title and gold ctx)
 
     # original NQ dataset has 2 forms of same question - original, and tokenized.
     # Tokenized form is not fully consisted with the original question if tokenized by some encoder tokenizers
@@ -989,3 +859,8 @@ def _is_from_gold_wiki_page(
 
     passage.is_from_gold = is_from_gold_wiki_page
     return is_from_gold_wiki_page
+
+
+def normalize_question(question: str) -> str:
+    question = question.replace("’", "'")
+    return question

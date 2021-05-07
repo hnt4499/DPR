@@ -20,7 +20,7 @@ import torch.nn.functional as F
 from torch import Tensor as T
 from torch import nn
 
-from dpr.data.biencoder_data import BiEncoderSample
+from dpr.data.data_types import BiEncoderSample
 from dpr.utils.data_utils import Tensorizer
 from dpr.utils.model_utils import CheckpointState, load_state_dict_to_model
 

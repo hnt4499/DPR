@@ -10,8 +10,8 @@ import jsonlines
 import torch
 from omegaconf import DictConfig
 
+from dpr.data.data_types import BiEncoderPassage
 from dpr.data.biencoder_data import (
-    BiEncoderPassage,
     normalize_passage,
     normalize_question,
     get_dpr_files,

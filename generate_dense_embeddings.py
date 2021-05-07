@@ -22,7 +22,7 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 from torch import nn
 
-from dpr.data.biencoder_data import BiEncoderPassage
+from dpr.data.data_types import BiEncoderPassage
 from dpr.models import init_biencoder_components
 from dpr.options import set_cfg_params_from_state, setup_cfg_gpu, setup_logger
 

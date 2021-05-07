@@ -9,13 +9,13 @@
  Set of utilities for the Reader model related data processing tasks
 """
 
-import collections
 import logging
 
 from typing import Tuple, List
 
 from dpr.utils.data_utils import Tensorizer
-from .general_data import DataPassage, DataSample, GeneralDataset, TokenizedWikipediaPassages
+from dpr.data.general_data import GeneralDataset
+from dpr.data.data_types import SpanPrediction
 
 logger = logging.getLogger()
 
@@ -25,55 +25,9 @@ logger = logging.getLogger()
 """
 
 
-class ReaderPassage(DataPassage):
-    """For backward compatibility."""
-    pass
-
-
-class ReaderSample(DataSample):
-    """For backward compatibility."""
-    pass
-
-
 class ExtractiveReaderDataset(GeneralDataset):
-    def __init__(
-        self,
-        files: str,
-        bm25_retrieval_file: str,
-        wiki_data: TokenizedWikipediaPassages,
-        is_train: bool,
-        gold_passages_src: str,
-        gold_passages_processed: str,
-        tensorizer: Tensorizer,
-        run_preprocessing: bool,
-        num_workers: int,
-        debugging: bool = False,
-    ):
-        super(ExtractiveReaderDataset, self).__init__(
-            mode="reader",
-            files=files,
-            bm25_retrieval_file=bm25_retrieval_file,
-            wiki_data=wiki_data,
-            is_train=is_train,
-            gold_passages_src=gold_passages_src,
-            gold_passages_processed=gold_passages_processed,
-            tensorizer=tensorizer,
-            run_preprocessing=run_preprocessing,
-            num_workers=num_workers,
-            debugging=debugging,
-        )
-
-
-SpanPrediction = collections.namedtuple(
-    "SpanPrediction",
-    [
-        "prediction_text",
-        "span_score",
-        "relevance_score",
-        "passage_index",
-        "passage_token_ids",
-    ],
-)
+    """For backward compatibility."""
+    pass
 
 
 """

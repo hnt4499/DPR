@@ -29,15 +29,14 @@ from typing import List, Tuple
 
 from dpr.data.qa_validation import exact_match_score, f1_score
 from dpr.utils.dist_utils import all_gather_list
+from dpr.data.data_types import ReaderBatch, ReaderSample, SpanPrediction
 from dpr.data.general_data import TokenizedWikipediaPassages
 from dpr.data.reader_data import (
-    ReaderSample,
     get_best_spans,
-    SpanPrediction,
     ExtractiveReaderDataset,
 )
 from dpr.models import init_reader_components
-from dpr.models.reader import create_reader_input, ReaderBatch, compute_loss
+from dpr.models.reader import create_reader_input, compute_loss
 from dpr.options import (
     setup_cfg_gpu,
     set_seed,

@@ -1,10 +1,9 @@
 import collections
-import csv
 import glob
 import logging
 import os
 import random
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import hydra
 import jsonlines
@@ -12,20 +11,20 @@ import pandas as pd
 import numpy as np
 import torch
 from omegaconf import DictConfig
-from torch import Tensor as T, dtype
+from torch import Tensor as T
 
 from dpr.data.tables import Table
 from dpr.utils.data_utils import read_data_from_json_files, Tensorizer
+from dpr.data.data_types import (
+    # Non-tokenized
+    BiEncoderPassage,
+    BiEncoderSample,
+    # Tokenized
+    BiEncoderPassageTokenized,
+    BiEncoderSampleTokenized
+)
 
 logger = logging.getLogger(__name__)
-BiEncoderPassage = collections.namedtuple("BiEncoderPassage", ["text", "title"])
-
-
-class BiEncoderSample(object):
-    query: str
-    positive_passages: List[BiEncoderPassage]
-    negative_passages: List[BiEncoderPassage]
-    hard_negative_passages: List[BiEncoderPassage]
 
 
 class RepTokenSelector(object):
