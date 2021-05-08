@@ -17,7 +17,7 @@ import random
 import sys
 import time
 import yaml
-from typing import Tuple
+from typing import Tuple, List
 
 import hydra
 import torch
@@ -27,7 +27,8 @@ from torch import Tensor as T
 from torch import nn
 
 from dpr.models import init_biencoder_components, init_loss
-from dpr.models.biencoder import BiEncoder, BiEncoderBatch, Match_BiEncoder, MatchGated_BiEncoder
+from dpr.data.data_types import BiEncoderBatch
+from dpr.models.biencoder import BiEncoder, Match_BiEncoder, MatchGated_BiEncoder
 from dpr.options import (
     setup_cfg_gpu,
     set_seed,
@@ -52,7 +53,7 @@ from dpr.utils.model_utils import (
     get_model_obj,
     load_states_from_checkpoint,
 )
-from dpr.data.biencoder_data import JsonQADatasetWithAllPassages
+from dpr.data.biencoder_data import Dataset, JsonQADatasetWithAllPassages, GeneralDatasetScheme
 
 
 logger = logging.getLogger()
@@ -138,14 +139,17 @@ class BiEncoderTrainer(object):
         )
 
         # randomized data loading to avoid file system congestion
-        datasets_list = [ds for ds in hydra_datasets]
+        datasets_list: List[Dataset] = [ds for ds in hydra_datasets]
         rnd = random.Random(rank)
         rnd.shuffle(datasets_list)
 
-        if isinstance(datasets_list[0], JsonQADatasetWithAllPassages):
-            [ds.load_data(datasets_list) for ds in datasets_list]
-        else:
-            [ds.load_data() for ds in datasets_list]
+        for dataset in datasets_list:
+            if isinstance(dataset, JsonQADatasetWithAllPassages):
+                dataset.load_data(datasets_list)
+            elif isinstance(dataset, GeneralDatasetScheme):
+                dataset.load_data(wiki_data=self.ds_cfg.wiki_data)
+            else:
+                dataset.load_data()
 
         sharded_iterator_initializers = [ShardedDataIteratorWithCategories if ds.sample_by_cat else ShardedDataIterator
                                          for ds in datasets_list]
@@ -277,12 +281,12 @@ class BiEncoderTrainer(object):
             if isinstance(samples_batch, Tuple):
                 samples_batch, dataset = samples_batch
             logger.info("Eval step: %d ,rnk=%s", i, cfg.local_rank)
-            biencoder_input = BiEncoder.create_biencoder_input2(
+            biencoder_input = BiEncoder.create_biencoder_input(
                 samples_batch,
                 self.tensorizer,
-                True,
-                num_hard_negatives,
-                num_other_negatives,
+                insert_title=True,
+                num_hard_negatives=num_hard_negatives,
+                num_other_negatives=num_other_negatives,
                 shuffle=False,
             )
 
@@ -380,7 +384,7 @@ class BiEncoderTrainer(object):
             if isinstance(samples_batch, Tuple):
                 samples_batch, dataset = samples_batch
 
-            biencoder_input = BiEncoder.create_biencoder_input2(
+            biencoder_input = BiEncoder.create_biencoder_input(
                 samples_batch,
                 self.tensorizer,
                 True,
@@ -584,7 +588,7 @@ class BiEncoderTrainer(object):
             data_iteration = train_data_iterator.get_iteration()
             random.seed(seed + epoch + data_iteration)
 
-            biencoder_batch = BiEncoder.create_biencoder_input2(
+            biencoder_batch = BiEncoder.create_biencoder_input(
                 samples_batch,
                 self.tensorizer,
                 True,
@@ -1025,7 +1029,7 @@ def main(cfg: DictConfig):
     if cfg.local_rank in [-1, 0]:
         logger.info("CFG (after gpu  configuration):")
         logger.info("%s", OmegaConf.to_yaml(cfg))
-        
+
         # Save config
         with open("config.yaml", "w") as fout:
             yaml.dump(eval(str(cfg)), fout)

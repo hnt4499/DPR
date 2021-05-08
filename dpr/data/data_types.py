@@ -159,7 +159,7 @@ BiEncoderPassage = collections.namedtuple(
     "BiEncoderPassage",
     [
         "text",
-        "title"
+        "title",
     ]
 )
 
@@ -174,15 +174,30 @@ class BiEncoderSample(object):
 BiEncoderPassageTokenized = collections.namedtuple(
     "BiEncoderPassageTokenized",
     [
+        "is_gold",
         "text_ids",
-        "title_ids"
+        "title_ids",
     ]
 )
 class BiEncoderSampleTokenized(object):
     query_ids: np.ndarray
     positive_passages: List[BiEncoderPassageTokenized]
-    negative_passages: List[BiEncoderPassageTokenized]
     hard_negative_passages: List[BiEncoderPassageTokenized]
+    bm25_negative_passages: List[BiEncoderPassageTokenized]
+
+# Training batch
+BiEncoderBatch = collections.namedtuple(
+    "BiEncoderBatch",
+    [
+        "question_ids",
+        "question_segments",
+        "context_ids",
+        "ctx_segments",
+        "is_positive",
+        "hard_negatives",
+        "encoder_type",
+    ],
+)
 
 
 """

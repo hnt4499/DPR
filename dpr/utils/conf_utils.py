@@ -3,6 +3,10 @@ import logging
 import hydra
 from omegaconf import DictConfig
 
+from dpr.data.biencoder_data import GeneralDatasetScheme
+from dpr.data.general_data import TokenizedWikipediaPassages
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,3 +30,9 @@ class BiencoderDatasetsCfg(object):
                 for ds_name in self.dev_datasets_names
             ]
         self.sampling_rates = cfg.train_sampling_rates
+
+        # If any of the dataset is of general dataset scheme, we need to initialize
+        # Wikipedia passages container
+        all_datasets = self.train_datasets + self.dev_datasets
+        if any(isinstance(dataset, GeneralDatasetScheme) for dataset in all_datasets):
+            self.wiki_data = TokenizedWikipediaPassages(data_file=cfg.wiki_data)

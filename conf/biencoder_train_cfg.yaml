@@ -7,6 +7,7 @@ defaults:
 
 train_datasets:
 dev_datasets:
+wiki_data:  # needed when `train_datasets` or `dev_datasets` is of general dataset scheme
 output_dir:
 train_sampling_rates:
 loss_scale_factors:

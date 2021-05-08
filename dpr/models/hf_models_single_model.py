@@ -11,8 +11,11 @@ encoding both question and context
 """
 
 import logging
+from typing import Dict, List
 
 import torch
+from torch import Tensor as T
+import numpy as np
 from transformers.tokenization_bert import BertTokenizer
 
 from dpr.models.biencoder import BiEncoder
@@ -120,13 +123,62 @@ class BertTensorizer(Tensorizer):
             assert token_ids[0] == self.tokenizer.cls_token_id
             token_ids[0] = self.tokenizer.convert_tokens_to_ids("[QST]")
 
-        seq_len = self.max_length
-        if self.pad_to_max and len(token_ids) < seq_len:
-            token_ids = token_ids + [self.tokenizer.pad_token_id] * (
-                seq_len - len(token_ids)
-            )
-        if len(token_ids) >= seq_len:
-            token_ids = token_ids[0:seq_len] if apply_max_len else token_ids
-            token_ids[-1] = self.tokenizer.sep_token_id
+        token_ids = self.to_max_length(np.array(token_ids), apply_max_len=apply_max_len)
 
-        return torch.tensor(token_ids)
+        return torch.from_numpy(token_ids)
+
+    def concatenate_inputs(
+        self,
+        ids: Dict[str, List[int]],
+        get_passage_offset: bool = False,
+        to_max_length: bool = False,  # for backward compatibility, this is set to False by default
+    ) -> T:
+        """
+        Simply concatenate inputs by adding [CLS] at the beginning and [SEP] at between and end.
+        """
+        # 3 mode: only question, only passage ("passage_title" + "passage") or all
+        current_mode = set(ids.keys())
+        allowed_modes = [{"question"}, {"passage_title", "passage"}, {"question", "passage_title", "passage"}]
+        if current_mode not in allowed_modes:
+            raise ValueError(f"Unexpected keys: {list(ids.keys())}")
+
+        cls_token = self.tokenizer.cls_token_id
+        sep_token = self.tokenizer.sep_token_id
+        qst_token = self.tokenizer.convert_tokens_to_ids("[QST]")
+
+        if current_mode == {"question"}:
+            assert not get_passage_offset
+            token_ids =  np.concatenate([
+                [qst_token],
+                ids["question"],
+                [sep_token],
+            ])
+        elif current_mode == {"passage_title", "passage"}:
+            token_ids = np.concatenate([
+                [cls_token],
+                ids["passage_title"],
+                [sep_token],
+                ids["passage"],
+                [sep_token],
+            ])
+            if get_passage_offset:
+                passage_offset = 2 + len(ids["passage_title"])
+        else:
+            token_ids = np.concatenate([
+                [qst_token],
+                ids["question"],
+                [sep_token],
+                ids["passage_title"],
+                [sep_token],
+                ids["passage"],
+                [sep_token],
+            ])
+            if get_passage_offset:
+                passage_offset = 3 + len(ids["question"]) + len(ids["passage_title"])
+
+        if to_max_length:
+            token_ids = self.to_max_length(token_ids, apply_max_len=True)
+
+        if get_passage_offset:
+            return torch.from_numpy(token_ids), passage_offset
+        return torch.from_numpy(token_ids)

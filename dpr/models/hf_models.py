@@ -276,6 +276,24 @@ class BertTensorizer(Tensorizer):
         self.max_length = max_length
         self.pad_to_max = pad_to_max
 
+    def to_max_length(
+        self,
+        token_ids: np.ndarray,
+        apply_max_len: bool = True,
+    ) -> np.ndarray:
+        """Pad or truncate to a specified maximum sequence length."""
+        seq_len = self.max_length
+        if self.pad_to_max and len(token_ids) < seq_len:
+            token_ids = np.concatenate([
+                token_ids,
+                [self.tokenizer.pad_token_id] * (seq_len - len(token_ids)),
+            ])
+        if len(token_ids) >= seq_len:
+            token_ids = token_ids[0:seq_len] if apply_max_len else token_ids
+            token_ids[-1] = self.tokenizer.sep_token_id
+
+        return token_ids
+
     def text_to_tensor(
         self,
         text: str,
@@ -305,18 +323,16 @@ class BertTensorizer(Tensorizer):
                 truncation=True,
             )
 
-        seq_len = self.max_length
-        if self.pad_to_max and len(token_ids) < seq_len:
-            token_ids = token_ids + [self.tokenizer.pad_token_id] * (
-                seq_len - len(token_ids)
-            )
-        if len(token_ids) >= seq_len:
-            token_ids = token_ids[0:seq_len] if apply_max_len else token_ids
-            token_ids[-1] = self.tokenizer.sep_token_id
+        token_ids = self.to_max_length(np.array(token_ids), apply_max_len=apply_max_len)
 
-        return torch.tensor(token_ids)
+        return torch.from_numpy(token_ids)
 
-    def concatenate_inputs(self, ids: Dict[str, List[int]], get_passage_offset: bool = False) -> T:
+    def concatenate_inputs(
+        self,
+        ids: Dict[str, List[int]],
+        get_passage_offset: bool = False,
+        to_max_length: bool = False,  # for backward compatibility, this is set to False by default
+    ) -> T:
         """
         Simply concatenate inputs by adding [CLS] at the beginning and [SEP] at between and end.
         """
@@ -331,14 +347,18 @@ class BertTensorizer(Tensorizer):
 
         if current_mode == {"question"}:
             assert not get_passage_offset
-            token_ids =  np.concatenate([cls_token], ids["question"], [sep_token])
+            token_ids = np.concatenate([
+                [cls_token],
+                ids["question"],
+                [sep_token],
+            ])
         elif current_mode == {"passage_title", "passage"}:
             token_ids = np.concatenate([
                 [cls_token],
                 ids["passage_title"],
                 [sep_token],
                 ids["passage"],
-                [sep_token]
+                [sep_token],
             ])
             if get_passage_offset:
                 passage_offset = 2 + len(ids["passage_title"])
@@ -350,10 +370,13 @@ class BertTensorizer(Tensorizer):
                 ids["passage_title"],
                 [sep_token],
                 ids["passage"],
-                [sep_token]
+                [sep_token],
             ])
             if get_passage_offset:
                 passage_offset = 3 + len(ids["question"]) + len(ids["passage_title"])
+
+        if to_max_length:
+            token_ids = self.to_max_length(token_ids, apply_max_len=True)
 
         if get_passage_offset:
             return torch.from_numpy(token_ids), passage_offset

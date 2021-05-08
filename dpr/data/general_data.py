@@ -114,7 +114,7 @@ class GeneralDataset(torch.utils.data.Dataset):
         self.files = files
         self.bm25_retrieval_file = bm25_retrieval_file
         self.wiki_data = wiki_data
-        self.data: List[DataSample] = []
+        self.data: List[DataSample] = None
         self.is_train = is_train
         self.gold_passages_src = gold_passages_src
         self.gold_passages_processed = gold_passages_processed
@@ -131,18 +131,19 @@ class GeneralDataset(torch.utils.data.Dataset):
         return len(self.data)
 
     def load_data(self):
-        data_files = glob.glob(self.files)
-        if len(data_files) == 0:
-            raise RuntimeError("No data files found")
-        preprocessed_data_files = self._get_preprocessed_files(data_files)
+        if self.data is None:
+            data_files = glob.glob(self.files)
+            if len(data_files) == 0:
+                raise RuntimeError("No data files found")
+            preprocessed_data_files = self._get_preprocessed_files(data_files)
 
-        if self.load_data_:
-            if self.debugging:
-                logger.info("Debugging mode is on. Restricting to at most 2 data files.")
-                preprocessed_data_files = preprocessed_data_files[:2]
+            if self.load_data_:
+                if self.debugging:
+                    logger.info("Debugging mode is on. Restricting to at most 2 data files.")
+                    preprocessed_data_files = preprocessed_data_files[:2]
 
-            logger.info(f"Reading data files: {preprocessed_data_files}")
-            self.data = read_serialized_data_from_files(preprocessed_data_files)
+                logger.info(f"Reading data files: {preprocessed_data_files}")
+                self.data = read_serialized_data_from_files(preprocessed_data_files)
 
     def _get_preprocessed_files(
         self,

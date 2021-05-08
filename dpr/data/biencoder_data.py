@@ -3,7 +3,7 @@ import glob
 import logging
 import os
 import random
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import hydra
 import jsonlines
@@ -21,8 +21,11 @@ from dpr.data.data_types import (
     BiEncoderSample,
     # Tokenized
     BiEncoderPassageTokenized,
-    BiEncoderSampleTokenized
+    BiEncoderSampleTokenized,
+    # Else
+    DataPassage
 )
+from dpr.data.general_data import TokenizedWikipediaPassages, GeneralDataset
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +118,7 @@ class Dataset(torch.utils.data.Dataset):
         self.encoder_type = encoder_type
         self.shuffle_positives = shuffle_positives
         self.query_special_suffix = query_special_suffix
+        self.sample_by_cat = False
 
     def load_data(self):
         raise NotImplementedError
@@ -450,6 +454,106 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
         r.negative_passages = [create_passage(ctx) for ctx in negative_ctxs]
         r.hard_negative_passages = [create_passage(ctx) for ctx in hard_negative_ctxs]
         return r
+
+
+class GeneralDatasetScheme(object):
+    """General dataset marker."""
+    def load_data(self, wiki_data: TokenizedWikipediaPassages):
+        raise NotImplementedError
+
+
+class BiEncoderGeneralDataset(Dataset, GeneralDatasetScheme):
+    def __init__(
+        self,
+        file: str,
+        selector: DictConfig = None,
+        shuffle_positives: bool = False,
+        special_token: str = None,
+        encoder_type: str = None,
+        only_gold: bool = False,
+    ):
+        """BiEncoder using general dataset scheme.
+
+        :param file: either path to a single dataset file (*.json) or a glob pattern to preprocessed pickle (*.pkl) files.
+        :only_gold: whether to keep only samples whose gold passage is available. Useful for retriever dev set.
+        """
+        super(BiEncoderGeneralDataset, self).__init__(
+            selector,
+            special_token=special_token,
+            shuffle_positives=shuffle_positives,
+            encoder_type=encoder_type,
+            query_special_suffix=None,
+        )
+        # TODO: try normalizing questions and passages
+        self.normalize = False
+        self.only_gold = only_gold
+
+        # Data should already be pre-processed
+        pickle_files = file.replace(".json", ".*.pkl")
+        pickle_files = glob.glob(pickle_files)
+        assert len(pickle_files) > 0, "Data should be already processed"
+
+        # Initialize general dataset
+        self.dataset = GeneralDataset(
+            files=file,
+            bm25_retrieval_file=None,
+            wiki_data=None,
+            is_train=None,
+            gold_passages_src=None,
+            gold_passages_processed=None,
+            tensorizer=None,
+            run_preprocessing=True,
+            num_workers=None,
+            debugging=False,
+            load_data=True,
+        )
+
+    def load_data(self, wiki_data: TokenizedWikipediaPassages):
+        self.wiki_data = wiki_data
+        self.wiki_data.load_data()
+        self.dataset.load_data()
+
+        # Remove those whose gold passage info is not available
+        if self.only_gold:
+            orig_len = len(self.dataset)
+            logger.info("Removing samples whose gold passage info is not available.")
+            self.dataset.data = [sample for sample in self.dataset.data if len(sample.gold_passages) > 0]
+            logger.info(f"Number of samples: before filtering: {orig_len}, after filtering: {len(self.dataset)}")
+
+    def _process_query(self, query: str):
+        # We don't use this function
+        raise NotImplementedError
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index) -> BiEncoderSampleTokenized:
+        sample = self.dataset[index]
+        r = BiEncoderSampleTokenized()
+        r.query_ids = sample.question_token_ids
+
+        positive_ctxs = sample.gold_passages + sample.positive_passages
+
+        # TODO: allow other kinds of positives and negatives, such as distantly positives
+        hard_negative_ctxs = sample.negative_passages
+        bm25_negative_ctxs = sample.bm25_negative_passages
+
+        def create_passage(ctx: DataPassage):
+            # Load passage tokens and title tokens first
+            tokens = self.wiki_data.get_tokenized_data(int(ctx.id))
+            ctx.load_tokens(**tokens)
+
+            return BiEncoderPassageTokenized(
+                is_gold=ctx.is_gold,
+                text_ids=ctx.passage_token_ids,
+                title_ids=ctx.title_token_ids,
+            )
+
+        r.positive_passages = [create_passage(ctx) for ctx in positive_ctxs]
+        r.hard_negative_passages = [create_passage(ctx) for ctx in hard_negative_ctxs]
+        r.bm25_negative_passages = [create_passage(ctx) for ctx in bm25_negative_ctxs]
+        return r
+
 
 def normalize_passage(ctx_text: str):
     ctx_text = ctx_text.replace("\n", " ").replace("’", "'")

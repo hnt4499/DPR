@@ -78,6 +78,21 @@ nq_dev:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-dev
 
+# ============================= General Data =================================
+nq_train_general:  # contains both BM25 negatives and dense hard negatives
+  _target_: dpr.data.biencoder_data.BiEncoderGeneralDataset
+  file: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new-2/train.json
+  shuffle_positives: True
+  only_gold: False
+
+nq_dev_general:  # contains both BM25 negatives and dense hard negatives
+  _target_: dpr.data.biencoder_data.BiEncoderGeneralDataset
+  file: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new-2/dev.json
+  shuffle_positives: False
+  only_gold: True
+
+# ============================================================================
+
 trivia_train:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.trivia-train
