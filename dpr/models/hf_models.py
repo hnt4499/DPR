@@ -395,6 +395,8 @@ class BertTensorizer(Tensorizer):
         return self.tokenizer.pad_token_id
 
     def get_attn_mask(self, tokens_tensor: T) -> T:
+        if tokens_tensor is None:
+            return None
         return tokens_tensor != self.get_pad_id()
 
     def is_sub_word_id(self, token_id: int):

@@ -14,7 +14,7 @@ import logging
 from typing import Tuple, List
 
 from dpr.utils.data_utils import Tensorizer
-from dpr.data.general_data import GeneralDataset
+from dpr.data.biencoder_data import OneForAllDataset
 from dpr.data.data_types import SpanPrediction
 
 logger = logging.getLogger()
@@ -25,9 +25,9 @@ logger = logging.getLogger()
 """
 
 
-class ExtractiveReaderDataset(GeneralDataset):
-    """For backward compatibility."""
-    pass
+class ExtractiveReaderGeneralDataset(OneForAllDataset):
+    def __init__(self, **kwargs):
+        super(ExtractiveReaderGeneralDataset, self).__init__(mode="reader" ,**kwargs)
 
 
 """

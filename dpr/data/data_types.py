@@ -233,3 +233,87 @@ SpanPrediction = collections.namedtuple(
         "passage_token_ids",
     ],
 )
+
+
+"""
+Configs
+For now for One-For-All models only
+"""
+
+
+# During input preparing
+BiEncoderDataConfig = collections.namedtuple(
+    "BiEncoderDataConfig",
+    [
+        "insert_title",
+        "num_hard_negatives",
+        "num_other_negatives",
+        "shuffle",
+        "shuffle_positives",
+        "hard_neg_fallback",
+        "query_token",
+    ],
+)
+
+# During forward pass
+BiEncoderTrainingConfig = collections.namedtuple(
+    "BiEncoderTrainingConfig",
+    [
+        "encoder_type",
+        "rep_positions_q",
+        "rep_positions_c",
+    ],
+)
+
+
+BiEncoderPredictionBatch = collections.namedtuple(
+    "BiEncoderPredictionBatch",
+    [
+        "question_vector",
+        "context_vector",
+    ],
+)
+
+
+# During input preparing
+ReaderDataConfig = collections.namedtuple(
+    "ReaderDataConfig",
+    [
+        "passages_per_question",
+        "max_length",  # encoder maximum sequence length, e.g., 256 or 350
+        "max_n_answers",  # maximum number of answer spans to marginalize per each sample
+        "is_train",
+        "shuffle",
+        "num_sub_batches",
+    ],
+)
+
+# During forward pass
+ReaderTrainingConfig = collections.namedtuple(
+    "ReaderTrainingConfig",
+    [
+        "use_simple_loss",
+        "average_loss",
+    ],
+)
+
+ReaderPredictionBatch = collections.namedtuple(
+    "ReaderPredictionBatch",
+    [
+        # During training
+        "total_loss",
+        # During evaluation
+        "start_logits",
+        "end_logits",
+        "relevance_logits",
+    ],
+)
+
+ReaderQuestionPredictions = collections.namedtuple(
+    "ReaderQuestionPredictions",
+    [
+        "id",
+        "predictions",
+        "gold_answers",
+    ]
+)

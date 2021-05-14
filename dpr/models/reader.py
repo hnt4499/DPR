@@ -10,7 +10,7 @@ The reader model code + its utilities (loss computation and input batch tensor g
 """
 
 import logging
-from typing import List
+from typing import List, Tuple
 
 import numpy as np
 import torch
@@ -18,10 +18,12 @@ import torch.nn as nn
 from torch import Tensor as T
 from torch.nn import CrossEntropyLoss
 
+from dpr.data.reader_data import get_best_spans
 from dpr.data.general_data import TokenizedWikipediaPassages
-from dpr.data.data_types import ReaderSample, ReaderPassage, ReaderBatch
+from dpr.data.data_types import ReaderSample, ReaderPassage, ReaderBatch, ReaderQuestionPredictions, SpanPrediction
 from dpr.utils.model_utils import init_weights, CheckpointState, load_state_dict_to_model
 from dpr.utils.data_utils import Tensorizer
+from dpr.utils.dist_utils import all_gather_list
 
 logger = logging.getLogger()
 
@@ -429,3 +431,111 @@ def _create_question_passages_tensors(
 
     input_ids = torch.stack([t for t in positives_selected + negatives_selected], dim=0)
     return input_ids, answer_starts_tensor, answer_ends_tensor, answer_mask
+
+
+"""
+Helper functions
+"""
+
+
+def gather(cfg, objects_to_sync: List[object]) -> List[Tuple]:
+    """Helper function to gather all needed data."""
+    distributed_world_size = cfg.distributed_world_size or 1
+
+    if distributed_world_size > 1:
+        global_objects_to_sync = all_gather_list(
+            objects_to_sync,
+            max_size=cfg.global_loss_buf_sz,
+        )
+
+        gathered_objects = []
+
+        for i, item in enumerate(global_objects_to_sync):
+            if i != cfg.local_rank:
+                gathered_objects.append(item)
+            else:
+                gathered_objects.append(objects_to_sync)
+
+    else:
+        gathered_objects = [objects_to_sync]
+
+    gathered_objects = list(zip(*gathered_objects))
+    return gathered_objects
+
+
+def get_best_prediction(
+    max_answer_length: int,
+    tensorizer,
+    start_logits,
+    end_logits,
+    relevance_logits,
+    samples_batch: List[ReaderSample],
+    passage_thresholds: List[int] = None,
+) -> List[ReaderQuestionPredictions]:
+
+    questions_num, passages_per_question = relevance_logits.size()
+
+    _, idxs = torch.sort(
+        relevance_logits,
+        dim=1,
+        descending=True,
+    )
+
+    batch_results = []
+    for q in range(questions_num):
+        sample = samples_batch[q]
+
+        all_passages = sample.positive_passages + sample.negative_passages
+        non_empty_passages_num = len(all_passages)
+        nbest = []
+        for p in range(passages_per_question):
+            passage_idx = idxs[q, p].item()
+            if (
+                passage_idx >= non_empty_passages_num
+            ):  # empty passage selected, skip
+                continue
+            reader_passage = all_passages[passage_idx]
+            sequence_ids = reader_passage.sequence_ids
+            sequence_len = sequence_ids.size(0)
+            # assuming question & title information is at the beginning of the sequence
+            passage_offset = reader_passage.passage_offset
+
+            p_start_logits = start_logits[q, passage_idx].tolist()[
+                passage_offset:sequence_len
+            ]
+            p_end_logits = end_logits[q, passage_idx].tolist()[
+                passage_offset:sequence_len
+            ]
+
+            ctx_ids = sequence_ids.tolist()[passage_offset:]
+            best_spans = get_best_spans(
+                tensorizer,
+                p_start_logits,
+                p_end_logits,
+                ctx_ids,
+                max_answer_length,
+                passage_idx,
+                relevance_logits[q, passage_idx].item(),
+                top_spans=10,
+            )
+            nbest.extend(best_spans)
+            if len(nbest) > 0 and not passage_thresholds:
+                break
+
+        if passage_thresholds:
+            passage_rank_matches = {}
+            for n in passage_thresholds:
+                curr_nbest = [pred for pred in nbest if pred.passage_index < n]
+                passage_rank_matches[n] = curr_nbest[0]
+            predictions = passage_rank_matches
+        else:
+            if len(nbest) == 0:
+                predictions = {
+                    passages_per_question: SpanPrediction("", -1, -1, -1, "")
+                }
+            else:
+                predictions = {passages_per_question: nbest[0]}
+        batch_results.append(
+            ReaderQuestionPredictions(sample.question, predictions, sample.answers)
+        )
+    return batch_results

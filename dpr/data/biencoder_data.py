@@ -3,7 +3,7 @@ import glob
 import logging
 import os
 import random
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 
 import hydra
 import jsonlines
@@ -23,9 +23,10 @@ from dpr.data.data_types import (
     BiEncoderPassageTokenized,
     BiEncoderSampleTokenized,
     # Else
-    DataPassage
+    DataPassage,
+    ReaderSample,
 )
-from dpr.data.general_data import TokenizedWikipediaPassages, GeneralDataset
+from dpr.data.general_data import TokenizedWikipediaPassages, GeneralDataset, GeneralDatasetScheme
 
 logger = logging.getLogger(__name__)
 
@@ -456,35 +457,37 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
         return r
 
 
-class GeneralDatasetScheme(object):
-    """General dataset marker."""
-    def load_data(self, wiki_data: TokenizedWikipediaPassages):
-        raise NotImplementedError
-
-
-class BiEncoderGeneralDataset(Dataset, GeneralDatasetScheme):
+class OneForAllDataset(Dataset, GeneralDatasetScheme):
     def __init__(
         self,
+        mode: str,
         file: str,
         selector: DictConfig = None,
         shuffle_positives: bool = False,
         special_token: str = None,
         encoder_type: str = None,
         only_gold: bool = False,
+        debugging: bool =  False,
     ):
-        """BiEncoder using general dataset scheme.
+        """One-for-all dataset using general dataset scheme. This dataset can be used for retriever (by setting `mode=="retriever"`),
+        reader (by setting `mode=="reader"`) for both (by setting `mode=="both"`).
+        For now this data is implemented under `biencoder_data` for some backward compatibility reasons.
 
         :param file: either path to a single dataset file (*.json) or a glob pattern to preprocessed pickle (*.pkl) files.
-        :only_gold: whether to keep only samples whose gold passage is available. Useful for retriever dev set.
+        :only_gold: whether to keep only samples whose gold passage is available. Useful for retriever dev set, since previously
+            all retriever data have gold passages. Data discrepancy could result in wrong selection of the best model during evaluation.
         """
-        super(BiEncoderGeneralDataset, self).__init__(
+        super(OneForAllDataset, self).__init__(
             selector,
             special_token=special_token,
             shuffle_positives=shuffle_positives,
             encoder_type=encoder_type,
             query_special_suffix=None,
         )
+
         # TODO: try normalizing questions and passages
+        assert mode in ["retriever", "reader", "both"], f"Invalid mode: {mode}"
+        self.mode = mode
         self.normalize = False
         self.only_gold = only_gold
 
@@ -504,7 +507,7 @@ class BiEncoderGeneralDataset(Dataset, GeneralDatasetScheme):
             tensorizer=None,
             run_preprocessing=True,
             num_workers=None,
-            debugging=False,
+            debugging=debugging,
             load_data=True,
         )
 
@@ -527,16 +530,25 @@ class BiEncoderGeneralDataset(Dataset, GeneralDatasetScheme):
     def __len__(self):
         return len(self.dataset)
 
-    def __getitem__(self, index) -> BiEncoderSampleTokenized:
-        sample = self.dataset[index]
-        r = BiEncoderSampleTokenized()
-        r.query_ids = sample.question_token_ids
+    def __getitem__(self, index) -> Union[
+        BiEncoderSampleTokenized,  # `mode=="retriever"`
+        ReaderSample,  # `mode=="reader`; note that `ReaderSample` is basically `DataSample`
+        Tuple[BiEncoderPassageTokenized, ReaderSample]  # `mode=="both"`
+    ]:
+        # Reader sample is without any further pre-processing
+        reader_sample = self.dataset[index]
+        if self.mode == "reader":
+            return reader_sample
 
-        positive_ctxs = sample.gold_passages + sample.positive_passages
+        # Retriever sample needs further pre-processing for backward compatibility
+        retriever_sample = BiEncoderSampleTokenized()
+        retriever_sample.query_ids = reader_sample.question_token_ids
+
+        positive_ctxs = reader_sample.gold_passages + reader_sample.positive_passages
 
         # TODO: allow other kinds of positives and negatives, such as distantly positives
-        hard_negative_ctxs = sample.negative_passages
-        bm25_negative_ctxs = sample.bm25_negative_passages
+        hard_negative_ctxs = reader_sample.negative_passages
+        bm25_negative_ctxs = reader_sample.bm25_negative_passages
 
         def create_passage(ctx: DataPassage):
             # Load passage tokens and title tokens first
@@ -549,10 +561,18 @@ class BiEncoderGeneralDataset(Dataset, GeneralDatasetScheme):
                 title_ids=ctx.title_token_ids,
             )
 
-        r.positive_passages = [create_passage(ctx) for ctx in positive_ctxs]
-        r.hard_negative_passages = [create_passage(ctx) for ctx in hard_negative_ctxs]
-        r.bm25_negative_passages = [create_passage(ctx) for ctx in bm25_negative_ctxs]
-        return r
+        retriever_sample.positive_passages = [create_passage(ctx) for ctx in positive_ctxs]
+        retriever_sample.hard_negative_passages = [create_passage(ctx) for ctx in hard_negative_ctxs]
+        retriever_sample.bm25_negative_passages = [create_passage(ctx) for ctx in bm25_negative_ctxs]
+
+        if self.mode == "retriever":
+            return retriever_sample
+        return retriever_sample, reader_sample
+
+
+class BiEncoderGeneralDataset(OneForAllDataset):
+    def __init__(self, **kwargs):
+        super(BiEncoderGeneralDataset, self).__init__(mode="retriever" ,**kwargs)
 
 
 def normalize_passage(ctx_text: str):

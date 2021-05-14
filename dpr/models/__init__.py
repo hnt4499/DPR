@@ -122,6 +122,23 @@ def init_reader_components(encoder_type: str, args, **kwargs):
     return init_comp(READER_INITIALIZERS, encoder_type, args, **kwargs)
 
 
+"""------------------------------- One-for-all ------------------------------"""
+def init_hf_bert_simple_ofa(args, **kwargs):
+    if importlib.util.find_spec("transformers") is None:
+        raise RuntimeError('Please install transformers lib')
+    from .hf_models_simple_one_for_all import get_bert_one_for_all_components
+    return get_bert_one_for_all_components(args)
+
+
+OFA_INITIALIZERS = {
+    'hf_bert_simple_ofa': init_hf_bert_simple_ofa,
+}
+
+
+def init_ofa_model(encoder_type: str, args, **kwargs):
+    return init_comp(OFA_INITIALIZERS, encoder_type, args, **kwargs)
+
+
 """------------------------------- Tensorizer -------------------------------"""
 
 
@@ -153,6 +170,13 @@ def init_hf_bert_tenzorizer_single_model_match_gated(args, **kwargs):
     return get_bert_tensorizer(args)
 
 
+def init_hf_bert_simple_ofa_tensorizer(args, **kwargs):
+    if importlib.util.find_spec("transformers") is None:
+        raise RuntimeError('Please install transformers lib')
+    from .hf_models_simple_one_for_all import get_bert_tensorizer
+    return get_bert_tensorizer(args)
+
+
 def init_hf_roberta_tenzorizer(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
@@ -165,6 +189,7 @@ TENSORIZER_INITIALIZERS = {
     'hf_bert_single_model': init_hf_bert_tenzorizer_single_model,
     'hf_bert_single_model_match': init_hf_bert_tenzorizer_single_model_match,
     'hf_bert_single_model_match_gated': init_hf_bert_tenzorizer_single_model_match_gated,
+    'hf_bert_simple_ofa': init_hf_bert_simple_ofa_tensorizer,
     'hf_roberta': init_hf_roberta_tenzorizer,
     'pytext_bert': init_hf_bert_tenzorizer,  # using HF's code as of now
     'fairseq_roberta': init_hf_roberta_tenzorizer,  # using HF's code as of now
@@ -206,6 +231,13 @@ def init_hf_bert_loss_single_model_match_gated(args, **kwargs):
     return MatchGated_BiEncoderNllLoss(args)
 
 
+def init_hf_bert_loss_simple_ofa(args, **kwargs):
+    if importlib.util.find_spec("transformers") is None:
+        raise RuntimeError('Please install transformers lib')
+    from .biencoder import BiEncoderNllLoss
+    return BiEncoderNllLoss(args)
+
+
 def init_hf_roberta_loss(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
@@ -218,6 +250,7 @@ LOSS_INITIALIZERS = {
     'hf_bert_single_model': init_hf_bert_loss_single_model,
     'hf_bert_single_model_match': init_hf_bert_loss_single_model_match,
     'hf_bert_single_model_match_gated': init_hf_bert_loss_single_model_match_gated,
+    'hf_bert_simple_ofa': init_hf_bert_loss_simple_ofa,
     'hf_roberta': init_hf_roberta_loss,
     'pytext_bert': init_hf_bert_loss,  # using HF's code as of now
     'fairseq_roberta': init_hf_roberta_loss,  # using HF's code as of now

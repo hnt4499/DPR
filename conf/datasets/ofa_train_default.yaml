@@ -1,0 +1,35 @@
+# @package _group_
+
+nq_train_ofa:  # contains both BM25 negatives and dense hard negatives
+  _target_: dpr.data.biencoder_data.OneForAllDataset
+  mode: both
+  file: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new-2/train.json
+  shuffle_positives: True
+  only_gold: False
+
+nq_dev_ofa:  # contains both BM25 negatives and dense hard negatives
+  _target_: dpr.data.biencoder_data.OneForAllDataset
+  mode: both
+  file: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new-2/dev.json
+  shuffle_positives: False
+  only_gold: True
+
+
+# ================================= Debugging datasets ===================================
+
+
+nq_train_ofa_debug:  # contains both BM25 negatives and dense hard negatives
+  _target_: dpr.data.biencoder_data.OneForAllDataset
+  mode: both
+  file: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new-2/train.json
+  shuffle_positives: True
+  only_gold: False
+  debugging: True
+
+nq_dev_ofa_debug:  # contains both BM25 negatives and dense hard negatives
+  _target_: dpr.data.biencoder_data.OneForAllDataset
+  mode: both
+  file: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new-2/dev.json
+  shuffle_positives: False
+  only_gold: True
+  debugging: True

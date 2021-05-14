@@ -1,0 +1,70 @@
+# configuration groups
+defaults:
+  - encoder: hf_bert_simple_ofa
+  - train: hf_bert_simple_ofa
+  - datasets: ofa_train_default
+
+train_datasets:
+dev_datasets:
+wiki_data: /data/tuyen/openqa/DPR/downloads/data/wikipedia_split/psgs_w100_tokenized.pkl.*
+output_dir:
+train_sampling_rates:
+
+# Whether to lower case the input text. Set True for uncased models, False for the cased ones.
+do_lower_case: True
+
+# Tokens which won't be slit by tokenizer
+special_tokens:
+
+seed: 12345
+checkpoint_file_name: dpr_ofa
+
+# A trained checkpoint file to initialize the model
+model_file:
+ignore_pretrained_model_type: false
+
+# TODO: move to a conf group
+# local_rank for distributed training on gpus
+local_rank: -1
+global_loss_buf_sz: 592000
+device:
+distributed_world_size:
+distributed_port:
+no_cuda: False
+n_gpu:
+fp16: False
+
+# For fp16: Apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."
+#        "See details at https://nvidia.github.io/apex/amp.html
+fp16_opt_level: O1
+
+# Gradient checkpointing settings
+gradient_checkpointing: False
+
+ignore_checkpoint_offset: False
+ignore_checkpoint_optimizer: False
+
+
+# Model-specific configs
+
+# Biencoder config
+biencoder:
+  hard_negatives: 1
+  other_negatives: 0
+  val_av_rank_start_epoch: 30
+  val_av_rank_hard_neg: 30  # number of hard negatives during average rank evaluation
+  val_av_rank_other_neg: 30  # number of other negatives during average rank evaluation
+  val_av_rank_bsz: 128
+  val_av_rank_max_qs: 10000
+
+# Reader config; refer to `extractive_reader_train_cfg.yaml` for descriptions
+reader:
+  passages_per_question: 8
+  passages_per_question_predict: 60
+  max_n_answers: 10
+  max_answer_length: 10
+  eval_top_docs:
+    - 50
+
+  use_simple_loss: False
+  average_loss: False

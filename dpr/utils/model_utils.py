@@ -9,7 +9,7 @@ import collections
 import glob
 import logging
 import os
-from typing import List
+from typing import List, Tuple, Union
 
 import torch
 from torch import nn
@@ -30,17 +30,34 @@ CheckpointState = collections.namedtuple(
     ],
 )
 
+CheckpointStateOFA = collections.namedtuple(
+    "CheckpointState",
+    [
+        "model_dict",
+        "biencoder_optimizer_dict",
+        "biencoder_scheduler_dict",
+        "reader_optimizer_dict",
+        "reader_scheduler_dict",
+        "offset",
+        "epoch",
+        "encoder_params",
+    ],
+)
+
 
 def setup_for_distributed_mode(
     model: nn.Module,
-    optimizer: torch.optim.Optimizer,
+    optimizer: Union[torch.optim.Optimizer, List[torch.optim.Optimizer]],
     device: object,
     n_gpu: int = 1,
     local_rank: int = -1,
     fp16: bool = False,
     fp16_opt_level: str = "O1",
     gradient_checkpointing: bool = False,
-) -> (nn.Module, torch.optim.Optimizer):
+) -> Tuple[
+    nn.Module,
+    Union[torch.optim.Optimizer, List[torch.optim.Optimizer]]
+]:
     model.to(device)
     if fp16 or (gradient_checkpointing and local_rank != -1):  # Gradient checkpointing AND DDP
         try:
@@ -72,7 +89,7 @@ def setup_for_distributed_mode(
                 output_device=local_rank,
                 find_unused_parameters=True,
             )
-        
+
     return model, optimizer
 
 
@@ -199,7 +216,7 @@ def load_state_dict_to_model(model: nn.Module, state_dict: dict):
     # Remove redundant params
     for key_redundant in keys_redundant:
         del state_dict[key_redundant]
-    
+
     if len(state_dict) == 0:
         raise ValueError("No weight to load.")
 

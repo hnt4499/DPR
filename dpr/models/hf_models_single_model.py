@@ -19,8 +19,8 @@ import numpy as np
 from transformers.tokenization_bert import BertTokenizer
 
 from dpr.models.biencoder import BiEncoder
-from .hf_models import _add_special_tokens, get_optimizer, HFBertEncoder
-from .hf_models import BertTensorizer as Tensorizer
+from dpr.models.hf_models import _add_special_tokens, get_optimizer, HFBertEncoder
+from dpr.models.hf_models import BertTensorizer as Tensorizer
 
 logger = logging.getLogger(__name__)
 

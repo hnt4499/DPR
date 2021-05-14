@@ -10,7 +10,6 @@
  Pipeline to train the reader model on top of the retriever results
 """
 
-import collections
 import json
 import sys
 import yaml
@@ -24,16 +23,14 @@ torch.autograd.set_detect_anomaly(True)
 
 from collections import defaultdict
 from omegaconf import DictConfig, OmegaConf
-from typing import List, Tuple
+from typing import List
 
-
+from dpr.models.reader import gather, get_best_prediction
 from dpr.data.qa_validation import exact_match_score, f1_score
-from dpr.utils.dist_utils import all_gather_list
-from dpr.data.data_types import ReaderBatch, ReaderSample, SpanPrediction
+from dpr.data.data_types import ReaderBatch, ReaderQuestionPredictions
 from dpr.data.general_data import TokenizedWikipediaPassages
 from dpr.data.reader_data import (
-    get_best_spans,
-    ExtractiveReaderDataset,
+    ExtractiveReaderGeneralDataset,
 )
 from dpr.models import init_reader_components
 from dpr.models.reader import create_reader_input, compute_loss
@@ -60,10 +57,6 @@ from dpr.utils.model_utils import (
 
 logger = logging.getLogger()
 setup_logger(logger)
-
-ReaderQuestionPredictions = collections.namedtuple(
-    "ReaderQuestionPredictions", ["id", "predictions", "gold_answers"]
-)
 
 
 class ReaderTrainer(object):
@@ -144,7 +137,7 @@ class ReaderTrainer(object):
             self.wiki_data = TokenizedWikipediaPassages(data_file=self.cfg.wiki_psgs_tokenized)
 
         bm25_retrieval_results = self.cfg.bm25_retrieval_results if is_train else None
-        dataset = ExtractiveReaderDataset(
+        dataset = ExtractiveReaderGeneralDataset(
             path,
             bm25_retrieval_results,
             self.wiki_data,
@@ -244,31 +237,6 @@ class ReaderTrainer(object):
                 logger.info(f"New Best validation checkpoint {cp_name} with validation score "
                             f"{reader_validation_score:.2f}")
 
-    def _gather(self, objects_to_sync: List[object]) -> List[Tuple]:
-        """Helper function to gather all needed data."""
-        cfg = self.cfg
-        distributed_world_size = cfg.distributed_world_size or 1
-
-        if distributed_world_size > 1:
-            global_objects_to_sync = all_gather_list(
-                objects_to_sync,
-                max_size=cfg.global_loss_buf_sz,
-            )
-
-            gathered_objects = []
-
-            for i, item in enumerate(global_objects_to_sync):
-                if i != cfg.local_rank:
-                    gathered_objects.append(item)
-                else:
-                    gathered_objects.append(objects_to_sync)
-
-        else:
-            gathered_objects = [objects_to_sync]
-
-        gathered_objects = list(zip(*gathered_objects))
-        return gathered_objects
-
     def validate(self):
         logger.info("Validation ...")
         cfg = self.cfg
@@ -302,7 +270,9 @@ class ReaderTrainer(object):
                     input.input_ids, attn_mask
                 )
 
-            batch_predictions = self._get_best_prediction(
+            batch_predictions = get_best_prediction(
+                self.cfg.max_answer_length,
+                self.tensorizer,
                 start_logits,
                 end_logits,
                 relevance_logits,
@@ -343,7 +313,7 @@ class ReaderTrainer(object):
                 f1s[n].append(f1_hit)
 
         # Sync between GPUs
-        ems, f1s = self._gather([ems, f1s])
+        ems, f1s = gather(self.cfg, [ems, f1s])
 
         em = 0
         for n in sorted(ems[0].keys()):
@@ -509,84 +479,6 @@ class ReaderTrainer(object):
         if saved_state.optimizer_dict:
             self.optimizer.load_state_dict(saved_state.optimizer_dict)
         self.scheduler_state = saved_state.scheduler_dict
-
-    def _get_best_prediction(
-        self,
-        start_logits,
-        end_logits,
-        relevance_logits,
-        samples_batch: List[ReaderSample],
-        passage_thresholds: List[int] = None,
-    ) -> List[ReaderQuestionPredictions]:
-
-        cfg = self.cfg
-        max_answer_length = cfg.max_answer_length
-        questions_num, passages_per_question = relevance_logits.size()
-
-        _, idxs = torch.sort(
-            relevance_logits,
-            dim=1,
-            descending=True,
-        )
-
-        batch_results = []
-        for q in range(questions_num):
-            sample = samples_batch[q]
-
-            all_passages = sample.positive_passages + sample.negative_passages
-            non_empty_passages_num = len(all_passages)
-            nbest = []
-            for p in range(passages_per_question):
-                passage_idx = idxs[q, p].item()
-                if (
-                    passage_idx >= non_empty_passages_num
-                ):  # empty passage selected, skip
-                    continue
-                reader_passage = all_passages[passage_idx]
-                sequence_ids = reader_passage.sequence_ids
-                sequence_len = sequence_ids.size(0)
-                # assuming question & title information is at the beginning of the sequence
-                passage_offset = reader_passage.passage_offset
-
-                p_start_logits = start_logits[q, passage_idx].tolist()[
-                    passage_offset:sequence_len
-                ]
-                p_end_logits = end_logits[q, passage_idx].tolist()[
-                    passage_offset:sequence_len
-                ]
-
-                ctx_ids = sequence_ids.tolist()[passage_offset:]
-                best_spans = get_best_spans(
-                    self.tensorizer,
-                    p_start_logits,
-                    p_end_logits,
-                    ctx_ids,
-                    max_answer_length,
-                    passage_idx,
-                    relevance_logits[q, passage_idx].item(),
-                    top_spans=10,
-                )
-                nbest.extend(best_spans)
-                if len(nbest) > 0 and not passage_thresholds:
-                    break
-
-            if passage_thresholds:
-                passage_rank_matches = {}
-                for n in passage_thresholds:
-                    curr_nbest = [pred for pred in nbest if pred.passage_index < n]
-                    passage_rank_matches[n] = curr_nbest[0]
-                predictions = passage_rank_matches
-            else:
-                if len(nbest) == 0:
-                    predictions = {
-                        passages_per_question: SpanPrediction("", -1, -1, -1, "")
-                    }
-                else:
-                    predictions = {passages_per_question: nbest[0]}
-            batch_results.append(
-                ReaderQuestionPredictions(sample.question, predictions, sample.answers)
-            )
-        return batch_results
 
     def _calc_loss(self, input: ReaderBatch) -> torch.Tensor:
         cfg = self.cfg

@@ -27,6 +27,7 @@ from dpr.data.data_types import (
 )
 from dpr.utils.data_utils import Tensorizer
 from dpr.utils.model_utils import CheckpointState, load_state_dict_to_model
+from dpr.utils.dist_utils import all_gather_list
 
 logger = logging.getLogger(__name__)
 
@@ -676,3 +677,104 @@ def _select_span_with_token(
             )
     else:
         return query_tensor
+
+
+"""
+Helper functions
+"""
+
+
+def gather(
+    cfg,
+    local_q_vector,
+    local_ctx_vectors,
+    local_positive_idxs,
+    local_hard_negatives_idxs: list = None,
+):
+    """Helper function for `_calc*` functions to gather all needed data."""
+    distributed_world_size = cfg.distributed_world_size or 1
+    if distributed_world_size > 1:
+        q_vector_to_send = (
+            torch.empty_like(local_q_vector).cpu().copy_(local_q_vector).detach_()
+        )
+        ctx_vector_to_send = (
+            torch.empty_like(local_ctx_vectors).cpu().copy_(local_ctx_vectors).detach_()
+        )
+
+        global_question_ctx_vectors = all_gather_list(
+            [
+                q_vector_to_send,
+                ctx_vector_to_send,
+                local_positive_idxs,
+                local_hard_negatives_idxs,
+            ],
+            max_size=cfg.global_loss_buf_sz,
+        )
+
+        global_q_vector = []
+        global_ctxs_vector = []
+
+        # ctxs_per_question = local_ctx_vectors.size(0)
+        positive_idx_per_question = []
+        hard_negatives_per_question = []
+
+        total_ctxs = 0
+
+        for i, item in enumerate(global_question_ctx_vectors):
+            q_vector, ctx_vectors, positive_idx, hard_negatives_idxs = item
+
+            if i != cfg.local_rank:
+                global_q_vector.append(q_vector.to(local_q_vector.device))
+                global_ctxs_vector.append(ctx_vectors.to(local_q_vector.device))
+                positive_idx_per_question.extend([v + total_ctxs for v in positive_idx])
+                hard_negatives_per_question.extend(
+                    [[v + total_ctxs for v in l] for l in hard_negatives_idxs]
+                )
+            else:
+                global_q_vector.append(local_q_vector)
+                global_ctxs_vector.append(local_ctx_vectors)
+                positive_idx_per_question.extend(
+                    [v + total_ctxs for v in local_positive_idxs]
+                )
+                hard_negatives_per_question.extend(
+                    [[v + total_ctxs for v in l] for l in local_hard_negatives_idxs]
+                )
+            total_ctxs += ctx_vectors.size(0)
+        global_q_vector = torch.cat(global_q_vector, dim=0)
+        global_ctxs_vector = torch.cat(global_ctxs_vector, dim=0)
+
+    else:
+        global_q_vector = local_q_vector
+        global_ctxs_vector = local_ctx_vectors
+        positive_idx_per_question = local_positive_idxs
+        hard_negatives_per_question = local_hard_negatives_idxs
+
+    return global_q_vector, global_ctxs_vector, positive_idx_per_question, hard_negatives_per_question
+
+
+def calc_loss(
+    cfg,
+    loss_function: BiEncoderNllLoss,
+    local_q_vector,
+    local_ctx_vectors,
+    local_positive_idxs,
+    local_hard_negatives_idxs: list = None,
+    loss_scale: float = None,
+) -> Tuple[T, bool]:
+    """
+    Calculates In-batch negatives schema loss and supports to run it in DDP mode by exchanging the representations
+    across all the nodes.
+    """
+    # Gather data
+    gathered_data = gather(cfg, local_q_vector, local_ctx_vectors, local_positive_idxs, local_hard_negatives_idxs)
+    global_q_vector, global_ctxs_vector, positive_idx_per_question, hard_negatives_per_question = gathered_data
+
+    loss, is_correct = loss_function.calc(
+        global_q_vector,
+        global_ctxs_vector,
+        positive_idx_per_question,
+        hard_negatives_per_question,
+        loss_scale=loss_scale,
+    )
+
+    return loss, is_correct

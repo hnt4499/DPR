@@ -28,7 +28,7 @@ from torch import nn
 
 from dpr.models import init_biencoder_components, init_loss
 from dpr.data.data_types import BiEncoderBatch
-from dpr.models.biencoder import BiEncoder, Match_BiEncoder, MatchGated_BiEncoder
+from dpr.models.biencoder import BiEncoder, Match_BiEncoder, MatchGated_BiEncoder, gather, calc_loss
 from dpr.options import (
     setup_cfg_gpu,
     set_seed,
@@ -53,7 +53,8 @@ from dpr.utils.model_utils import (
     get_model_obj,
     load_states_from_checkpoint,
 )
-from dpr.data.biencoder_data import Dataset, JsonQADatasetWithAllPassages, GeneralDatasetScheme
+from dpr.data.general_data import GeneralDatasetScheme
+from dpr.data.biencoder_data import Dataset, JsonQADatasetWithAllPassages
 
 
 logger = logging.getLogger()
@@ -749,102 +750,6 @@ class BiEncoderTrainer(object):
                 self.scheduler_state = saved_state.scheduler_dict
 
 
-def _gather(
-    cfg,
-    local_q_vector,
-    local_ctx_vectors,
-    local_positive_idxs,
-    local_hard_negatives_idxs: list = None,
-):
-    """Helper function for `_calc*` functions to gather all needed data."""
-    distributed_world_size = cfg.distributed_world_size or 1
-    if distributed_world_size > 1:
-        q_vector_to_send = (
-            torch.empty_like(local_q_vector).cpu().copy_(local_q_vector).detach_()
-        )
-        ctx_vector_to_send = (
-            torch.empty_like(local_ctx_vectors).cpu().copy_(local_ctx_vectors).detach_()
-        )
-
-        global_question_ctx_vectors = all_gather_list(
-            [
-                q_vector_to_send,
-                ctx_vector_to_send,
-                local_positive_idxs,
-                local_hard_negatives_idxs,
-            ],
-            max_size=cfg.global_loss_buf_sz,
-        )
-
-        global_q_vector = []
-        global_ctxs_vector = []
-
-        # ctxs_per_question = local_ctx_vectors.size(0)
-        positive_idx_per_question = []
-        hard_negatives_per_question = []
-
-        total_ctxs = 0
-
-        for i, item in enumerate(global_question_ctx_vectors):
-            q_vector, ctx_vectors, positive_idx, hard_negatives_idxs = item
-
-            if i != cfg.local_rank:
-                global_q_vector.append(q_vector.to(local_q_vector.device))
-                global_ctxs_vector.append(ctx_vectors.to(local_q_vector.device))
-                positive_idx_per_question.extend([v + total_ctxs for v in positive_idx])
-                hard_negatives_per_question.extend(
-                    [[v + total_ctxs for v in l] for l in hard_negatives_idxs]
-                )
-            else:
-                global_q_vector.append(local_q_vector)
-                global_ctxs_vector.append(local_ctx_vectors)
-                positive_idx_per_question.extend(
-                    [v + total_ctxs for v in local_positive_idxs]
-                )
-                hard_negatives_per_question.extend(
-                    [[v + total_ctxs for v in l] for l in local_hard_negatives_idxs]
-                )
-            total_ctxs += ctx_vectors.size(0)
-        global_q_vector = torch.cat(global_q_vector, dim=0)
-        global_ctxs_vector = torch.cat(global_ctxs_vector, dim=0)
-
-    else:
-        global_q_vector = local_q_vector
-        global_ctxs_vector = local_ctx_vectors
-        positive_idx_per_question = local_positive_idxs
-        hard_negatives_per_question = local_hard_negatives_idxs
-
-    return global_q_vector, global_ctxs_vector, positive_idx_per_question, hard_negatives_per_question
-
-
-def _calc_loss(
-    cfg,
-    loss_function,
-    local_q_vector,
-    local_ctx_vectors,
-    local_positive_idxs,
-    local_hard_negatives_idxs: list = None,
-    loss_scale: float = None,
-) -> Tuple[T, bool]:
-    """
-    Calculates In-batch negatives schema loss and supports to run it in DDP mode by exchanging the representations
-    across all the nodes.
-    """
-    # Gather data
-    gathered_data = _gather(cfg, local_q_vector, local_ctx_vectors, local_positive_idxs, local_hard_negatives_idxs)
-    global_q_vector, global_ctxs_vector, positive_idx_per_question, hard_negatives_per_question = gathered_data
-
-    loss, is_correct = loss_function.calc(
-        global_q_vector,
-        global_ctxs_vector,
-        positive_idx_per_question,
-        hard_negatives_per_question,
-        loss_scale=loss_scale,
-    )
-
-    return loss, is_correct
-
-
 def _gather_interaction_matrices(
     cfg,
     local_interaction_matrix,
@@ -893,7 +798,7 @@ def _calc_loss_matching(
     Note that this function also handle distributedly making forward call to the model to get interaction matrix.
     """
     # Gather data
-    gathered_data = _gather(cfg, local_q_vector, local_ctx_vectors, local_positive_idxs, local_hard_negatives_idxs)
+    gathered_data = gather(cfg, local_q_vector, local_ctx_vectors, local_positive_idxs, local_hard_negatives_idxs)
     global_q_vector, global_ctxs_vector, positive_idx_per_question, hard_negatives_per_question = gathered_data
 
     # Distribute context vectors across GPUs, since the number of context vectors is larger than that of question vectors
@@ -989,7 +894,7 @@ def _do_biencoder_fwd_pass(
         ml_is_correct = ml_is_correct.sum().item()
         matching_is_correct = matching_is_correct.sum().item()
     else:
-        loss, is_correct = _calc_loss(
+        loss, is_correct = calc_loss(
             cfg,
             loss_function,
             local_q_vector,

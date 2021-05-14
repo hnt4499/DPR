@@ -204,6 +204,12 @@ class GeneralDataset(torch.utils.data.Dataset):
         return serialized_files
 
 
+class GeneralDatasetScheme(object):
+    """General dataset marker."""
+    def load_data(self, wiki_data: TokenizedWikipediaPassages):
+        raise NotImplementedError
+
+
 def preprocess_retriever_results(
     is_train_set: bool,
     input_file: str,
