@@ -687,12 +687,16 @@ class OneForAllTrainer(object):
         for n in sorted(ems[0].keys()):
             ems_n = sum([em[n] for em in ems], [])  # gather and concatenate
             em = np.mean(ems_n)
-            logger.info("n=%d\tEM %.2f" % (n, em * 100))
+
+            if cfg.local_rank in [-1, 0]:
+                logger.info("n=%d\tEM %.2f" % (n, em * 100))
 
         for n in sorted(f1s[0].keys()):
             f1s_n = sum([f1[n] for f1 in f1s], [])  # gather and concatenate
             f1 = np.mean(f1s_n)
-            logger.info("n=%d\tF1 %.2f" % (n, f1 * 100))
+
+            if cfg.local_rank in [-1, 0]:
+                logger.info("n=%d\tF1 %.2f" % (n, f1 * 100))
 
         return em
 

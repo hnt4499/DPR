@@ -64,7 +64,11 @@ reader:
   max_n_answers: 10
   max_answer_length: 10
   eval_top_docs:
+    - 5
+    - 10
+    - 25
     - 50
+    - 60
 
   use_simple_loss: False
   average_loss: False
