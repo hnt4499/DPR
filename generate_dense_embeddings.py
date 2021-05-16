@@ -146,27 +146,35 @@ def main(cfg: DictConfig):
     ctx_src.load_data_to(all_passages_dict)
     all_passages = [(k, v) for k, v in all_passages_dict.items()]
 
+    if isinstance(cfg.shard_id, int):
+        shard_ids = [cfg.shard_id]
+    else:
+        shard_ids = cfg.shard_id
+
     shard_size = math.ceil(len(all_passages) / cfg.num_shards)
-    start_idx = cfg.shard_id * shard_size
-    end_idx = start_idx + shard_size
+    for shard_id in shard_ids:
 
-    logger.info(
-        "Producing encodings for passages range: %d to %d (out of total %d)",
-        start_idx,
-        end_idx,
-        len(all_passages),
-    )
-    shard_passages = all_passages[start_idx:end_idx]
+        start_idx = shard_id * shard_size
+        end_idx = start_idx + shard_size
 
-    data = gen_ctx_vectors(cfg, shard_passages, encoder, tensorizer, True)
+        logger.info(
+            "Producing encodings for passages range: %d to %d (out of total %d)",
+            start_idx,
+            end_idx,
+            len(all_passages),
+        )
+        shard_passages = all_passages[start_idx:end_idx]
 
-    file = cfg.out_file + "_" + str(cfg.shard_id)
-    pathlib.Path(os.path.dirname(file)).mkdir(parents=True, exist_ok=True)
-    logger.info("Writing results to %s" % file)
-    with open(file, mode="wb") as f:
-        pickle.dump(data, f)
+        data = gen_ctx_vectors(cfg, shard_passages, encoder, tensorizer, True)
 
-    logger.info("Total passages processed %d. Written to %s", len(data), os.path.realpath(file))
+        file = cfg.out_file + "_" + str(shard_id)
+        pathlib.Path(os.path.dirname(file)).mkdir(parents=True, exist_ok=True)
+        logger.info("Writing results to %s" % file)
+        with open(file, mode="wb") as f:
+            pickle.dump(data, f)
+
+        logger.info("Total passages processed %d. Written to %s", len(data), os.path.realpath(file))
+        del data  # release memory
 
 
 if __name__ == "__main__":
