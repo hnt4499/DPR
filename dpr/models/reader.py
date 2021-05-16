@@ -38,27 +38,36 @@ class Reader(nn.Module):
         init_weights([self.qa_outputs, self.qa_classifier])
 
     def forward(self, input_ids: T, attention_mask: T, start_positions=None, end_positions=None, answer_mask=None,
-                use_simple_loss: bool = False, average_loss: bool = False):
+                use_simple_loss: bool = False, average_loss: bool = False, passage_scores: T = None):
         # notations: N - number of questions in a batch, M - number of passages per questions, L - sequence length
         N, M, L = input_ids.size()
         input_ids = input_ids.view(N * M, L)
         attention_mask = attention_mask.view(N * M, L)
+        if passage_scores is not None:
+            passage_scores = passage_scores.view(N * M, 1, 1)
 
-        start_logits, end_logits, relevance_logits = self._forward(input_ids, attention_mask)
+        start_logits, end_logits, relevance_logits = self._forward(input_ids, attention_mask, passage_scores=passage_scores)
         if self.training:
             return compute_loss(start_positions, end_positions, answer_mask, start_logits, end_logits, relevance_logits,
                                 N, M, use_simple_loss=use_simple_loss, average=average_loss)
 
         return start_logits.view(N, M, L), end_logits.view(N, M, L), relevance_logits.view(N, M)
 
-    def _forward(self, input_ids, attention_mask):
+    def _forward(self, input_ids, attention_mask, passage_scores=None):
         # TODO: provide segment values
-        sequence_output = self.encoder(input_ids, None, attention_mask)[0]
-        logits = self.qa_outputs(sequence_output)
-        start_logits, end_logits = logits.split(1, dim=-1)
-        start_logits = start_logits.squeeze(-1)
-        end_logits = end_logits.squeeze(-1)
+        sequence_output = self.encoder(input_ids, None, attention_mask)[0]  # (N * M, L, H)
+        logits = self.qa_outputs(sequence_output)  # (N * M, L, 2)
+
+        # Retriever-reader interaction via passage scores
+        if passage_scores is not None:
+            logits = logits * passage_scores  # (N * M, L, 2)
+
+        start_logits, end_logits = logits.split(1, dim=-1)  # (N * M, L, 1), (N * M, L, 1)
+        start_logits = start_logits.squeeze(-1)  # (N * M, L)
+        end_logits = end_logits.squeeze(-1)  # (N * M, L)
+
         rank_logits = self.qa_classifier(sequence_output[:, 0, :])
+
         return start_logits, end_logits, rank_logits
 
     def load_state(self, saved_state: CheckpointState):
@@ -239,6 +248,7 @@ def create_reader_input(
     :param shuffle: should passages selection be randomized
     :return: ReaderBatch instance
     """
+    context_IDs = []
     input_ids = []
     start_positions = []
     end_positions = []
@@ -267,20 +277,25 @@ def create_reader_input(
         if not sample_tensors:
             logger.warning('No valid passages combination for question=%s ', sample.question)
             continue
-        sample_input_ids, starts_tensor, ends_tensor, answer_mask = sample_tensors
+        context_ID, sample_input_ids, starts_tensor, ends_tensor, answer_mask = sample_tensors
+
+        context_IDs.append(context_ID)
         input_ids.append(sample_input_ids)
+
         if is_train:
             start_positions.append(starts_tensor)
             end_positions.append(ends_tensor)
             answers_masks.append(answer_mask)
-    input_ids = torch.cat([ids.unsqueeze(0) for ids in input_ids], dim=0)
+
+    context_IDs = torch.cat([IDs.unsqueeze(0) for IDs in context_IDs], dim=0)  # (N, M)
+    input_ids = torch.cat([ids.unsqueeze(0) for ids in input_ids], dim=0)  # (N, M)
 
     if is_train:
         start_positions = torch.stack(start_positions, dim=0)
         end_positions = torch.stack(end_positions, dim=0)
         answers_masks = torch.stack(answers_masks, dim=0)
 
-    return ReaderBatch(input_ids, start_positions, end_positions, answers_masks)
+    return ReaderBatch(context_IDs, input_ids, start_positions, end_positions, answers_masks)
 
 
 def _calc_mml(loss_tensor, average=False):
@@ -307,7 +322,7 @@ def _calc_mml_v2(loss_tensor, average=False):
     return -loss.mean() if average else -loss.sum()  # scalar
 
 
-def _pad_to_len(seq: T, pad_id: int, max_len: int):
+def pad_to_len(seq: T, pad_id: int, max_len: int):
     s_len = seq.size(0)
     if s_len > max_len:
         return seq[0: max_len]
@@ -380,7 +395,8 @@ def _create_question_passages_tensors(
         assert all(s < max_len for s in answer_starts)
         assert all(e < max_len for e in answer_ends)
 
-        positive_input_ids = _pad_to_len(positive.sequence_ids, pad_token_id, max_len)
+        positive_input_ids = tensorizer.to_max_length(positive.sequence_ids.numpy(), apply_max_len=True)
+        positive_input_ids = torch.from_numpy(positive_input_ids)
 
         answer_starts_tensor = torch.zeros((total_size, max_n_answers)).long()
         answer_starts_tensor[0, 0:len(answer_starts)] = torch.tensor(answer_starts)  # only first passage contains the answer
@@ -391,9 +407,11 @@ def _create_question_passages_tensors(
         answer_mask = torch.zeros((total_size, max_n_answers), dtype=torch.long)
         answer_mask[0, 0:len(answer_starts)] = torch.tensor([1 for _ in range(len(answer_starts))])
 
+        positives_IDs: List[int] = [positive.id]
         positives_selected = [positive_input_ids]
 
     else:
+        positives_IDs: List[int] = []
         positives_selected = []
         answer_starts_tensor = None
         answer_ends_tensor = None
@@ -405,7 +423,9 @@ def _create_question_passages_tensors(
 
     negative_idxs = negative_idxs[:total_size - positives_num]
 
+    negatives_IDs: List[int] = []
     negatives_selected = []
+
     for negative_idx in negative_idxs:
         negative = negatives[negative_idx]
 
@@ -424,13 +444,20 @@ def _create_question_passages_tensors(
             negative.sequence_ids = sequence_ids
             negative.passage_offset = passage_offset
 
-        negatives_selected.append(_pad_to_len(negative.sequence_ids, pad_token_id, max_len))
+        negatives_IDs.append(negative.id)
+
+        negative_input_ids = tensorizer.to_max_length(negative.sequence_ids.numpy(), apply_max_len=True)
+        negatives_selected.append(torch.from_numpy(negative_input_ids))
 
     while len(negatives_selected) < total_size - positives_num:
+        negatives_IDs.append(-1)
         negatives_selected.append(empty_ids.clone())
 
+    context_IDs = torch.tensor(positives_IDs + negatives_IDs, dtype=torch.int64)
     input_ids = torch.stack([t for t in positives_selected + negatives_selected], dim=0)
-    return input_ids, answer_starts_tensor, answer_ends_tensor, answer_mask
+    assert len(context_IDs) == len(input_ids)
+
+    return context_IDs, input_ids, answer_starts_tensor, answer_ends_tensor, answer_mask
 
 
 """

@@ -533,7 +533,7 @@ class OneForAllDataset(Dataset, GeneralDatasetScheme):
     def __getitem__(self, index) -> Union[
         BiEncoderSampleTokenized,  # `mode=="retriever"`
         ReaderSample,  # `mode=="reader`; note that `ReaderSample` is basically `DataSample`
-        Tuple[BiEncoderPassageTokenized, ReaderSample]  # `mode=="both"`
+        Tuple[BiEncoderSampleTokenized, ReaderSample]  # `mode=="both"`
     ]:
         # Reader sample is without any further pre-processing
         reader_sample = self.dataset[index]
@@ -556,6 +556,7 @@ class OneForAllDataset(Dataset, GeneralDatasetScheme):
             ctx.load_tokens(**tokens)
 
             return BiEncoderPassageTokenized(
+                id=ctx.id,
                 is_gold=ctx.is_gold,
                 text_ids=ctx.passage_token_ids,
                 title_ids=ctx.title_token_ids,

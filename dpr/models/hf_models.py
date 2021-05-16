@@ -11,7 +11,7 @@ Encoder model wrappers based on HuggingFace code
 
 from functools import partial
 import logging
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Set
 
 import numpy as np
 import torch
@@ -286,9 +286,9 @@ class BertTensorizer(Tensorizer):
         if self.pad_to_max and len(token_ids) < seq_len:
             token_ids = np.concatenate([
                 token_ids,
-                [self.tokenizer.pad_token_id] * (seq_len - len(token_ids)),
+                [self.get_pad_id()] * (seq_len - len(token_ids)),
             ])
-        if len(token_ids) >= seq_len:
+        if len(token_ids) > seq_len:
             token_ids = token_ids[0:seq_len] if apply_max_len else token_ids
             token_ids[-1] = self.tokenizer.sep_token_id
 
@@ -381,6 +381,78 @@ class BertTensorizer(Tensorizer):
         if get_passage_offset:
             return torch.from_numpy(token_ids), passage_offset
         return torch.from_numpy(token_ids)
+
+    def remove_padding(self, ids: T) -> T:
+        if not (ids == self.get_pad_id()).any():
+            return ids
+        # Index of the first pad token
+        first_pad_id = (ids == self.get_pad_id()).int().argmax()
+        # Make sure all of tokens followed are pad tokens
+        assert (ids[first_pad_id:] == self.get_pad_id()).all(), (
+            f"All pad tokens ({self.get_pad_id()}) must be at the end of the sequence: {ids}"
+        )
+
+        return ids[:first_pad_id]
+
+    def unconcatenate_inputs(
+        self,
+        ids: T,
+        components: Set[str],
+    ) -> Dict[str, T]:
+
+        # Remove padding
+        ids = self.remove_padding(ids)
+        if len(ids) == 0:  # full padding
+            return None
+
+        if components == {"question"}:
+            return {"question": ids[1:-1]}
+
+        elif components == {"passage_title", "passage"}:
+            # Get all [SEP] indicies
+            sep_ids: T = (ids == self.tokenizer.sep_token_id).nonzero().squeeze()
+            assert sep_ids.numel() == 2, (
+                f"Expected 2 [SEP] ({self.tokenizer.sep_token_id}) tokens, "
+                f"got {sep_ids.numel()} instead: {ids}"
+            )
+
+            passage_title_start = 1
+            passage_title_end = sep_ids[0]
+            passage_title_ids = ids[passage_title_start:passage_title_end]
+
+            passage_start = passage_title_end + 1
+            passage_end = -1
+            passage_ids = ids[passage_start:passage_end]
+
+            return {"passage_title": passage_title_ids, "passage": passage_ids}
+
+        elif components == {"question", "passage_title", "passage"}:
+            # Get all [SEP] indicies
+            sep_ids: T = (ids == self.tokenizer.sep_token_id).nonzero().squeeze()
+            assert sep_ids.numel() == 3, (
+                f"Expected 3 [SEP] ({self.tokenizer.sep_token_id}) tokens, "
+                f"got {sep_ids.numel()} instead: {ids}"
+            )
+
+            question_start = 1
+            question_end = sep_ids[0]
+            question_ids = ids[question_start:question_end]
+
+            passage_title_start = question_end + 1
+            passage_title_end = sep_ids[1]
+            passage_title_ids = ids[passage_title_start:passage_title_end]
+
+            passage_start = passage_title_end + 1
+            passage_end = -1
+            passage_ids = ids[passage_start:passage_end]
+
+            return {
+                "question": question_ids,
+                "passage_title": passage_title_ids,
+                "passage": passage_ids,
+            }
+        else:
+            raise ValueError(f"Invalid components: {components}")
 
     def tensor_to_text(
         self,

@@ -174,6 +174,7 @@ class BiEncoderSample(object):
 BiEncoderPassageTokenized = collections.namedtuple(
     "BiEncoderPassageTokenized",
     [
+        "id",
         "is_gold",
         "text_ids",
         "title_ids",
@@ -191,6 +192,7 @@ BiEncoderBatch = collections.namedtuple(
     [
         "question_ids",
         "question_segments",
+        "context_IDs",
         "context_ids",
         "ctx_segments",
         "is_positive",
@@ -216,11 +218,14 @@ class ReaderSample(DataSample):
 ReaderBatch = collections.namedtuple(
     'ReaderBatch',
     [
+        'context_IDs',
         'input_ids',
         'start_positions',
         'end_positions',
-        'answers_mask'
+        'answers_mask',
+        'passage_scores',
     ],
+    defaults=[None],  # default `passage_scores` to None
 )
 
 SpanPrediction = collections.namedtuple(

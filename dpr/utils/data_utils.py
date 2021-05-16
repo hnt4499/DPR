@@ -14,6 +14,7 @@ import logging
 import pickle
 import random
 import time
+from typing import List, Iterator, Callable, Tuple, Dict, Set
 
 import itertools
 import math
@@ -21,7 +22,6 @@ import math
 import numpy as np
 import torch
 from torch import Tensor as T
-from typing import List, Iterator, Callable, Tuple, Dict
 
 logger = logging.getLogger()
 
@@ -456,6 +456,13 @@ class Tensorizer(object):
     ) -> T:
         raise NotImplementedError
 
+    def to_max_length(
+        self,
+        token_ids: np.ndarray,
+        apply_max_len: bool = True,
+    ) -> np.ndarray:
+        raise NotImplementedError
+
     def concatenate_inputs(
         self,
         ids: Dict[str, List[int]],
@@ -464,6 +471,16 @@ class Tensorizer(object):
     ) -> T:
         """
         Concatenate inputs for either retriever or reader model.
+        """
+        raise NotImplementedError
+
+    def unconcatenate_inputs(
+        self,
+        ids: T,
+        components: Set[str],
+    ) -> Dict[str, T]:
+        """
+        Split concatenated input to its components. (inputs and outputs are reversed of `concatenate_inputs`)
         """
         raise NotImplementedError
 

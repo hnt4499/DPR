@@ -6,9 +6,9 @@ Base, high-level classes for One-For-All models.
 import math
 from typing import List, Tuple, Union
 
-
+import torch
 import torch.nn as nn
-
+from torch import Tensor as T
 
 from dpr.data.general_data import TokenizedWikipediaPassages
 from dpr.data.data_types import (
@@ -90,6 +90,7 @@ class SimpleOneForAllModel(nn.Module):
                 reader_batch.answers_mask,
                 use_simple_loss=reader_config.use_simple_loss,
                 average_loss=reader_config.average_loss,
+                passage_scores=reader_batch.passage_scores,
             )
             if isinstance(reader_out, tuple):
                 start_logits, end_logits, relevance_logits = reader_out
@@ -163,6 +164,8 @@ def create_ofa_input(
         for batch_i in range(num_sub_batches):
             start = batch_i * sub_batch_size
             end = min(start + sub_batch_size, num_samples)
+            if start >= end:
+                break
 
             reader_batch = create_reader_input(
                 wiki_data=wiki_data,
@@ -182,3 +185,62 @@ def create_ofa_input(
         return reader_batches
     else:
         return biencoder_batch, reader_batches
+
+
+def create_biencoder_input_from_reader_input(
+    tensorizer: Tensorizer,
+    reader_batch: ReaderBatch,
+) -> BiEncoderBatch:
+
+    input_ids = reader_batch.input_ids  # (N, M, L)
+    question_ids: List[T] = []  # len N
+    context_ids: List[T] = []  # len N * M
+
+    for input_id_i in input_ids:
+        for j, input_id in enumerate(input_id_i):
+            ids = tensorizer.unconcatenate_inputs(
+                input_id,
+                components={"question", "passage_title", "passage"}
+            )
+
+            if ids is None:  # full padding
+                context_ids.append(input_id)
+                continue
+
+            # Question
+            question_id = tensorizer.concatenate_inputs(
+                ids={"question": ids["question"].tolist()},
+                get_passage_offset=False,
+                to_max_length=True,
+            )
+            if j == 0:
+                question_ids.append(question_id)
+            else:
+                assert (question_id == question_ids[-1]).all()
+
+            # Passage
+            passage_title = ids["passage_title"]
+            passage = ids["passage"]
+            context_ids.append(tensorizer.concatenate_inputs(
+                ids={"passage_title": passage_title.tolist(), "passage": passage.tolist()},
+                get_passage_offset=False,
+                to_max_length=True,
+            ))
+
+    question_ids = torch.stack(question_ids)
+    context_ids = torch.stack(context_ids)
+
+    question_segments = torch.zeros_like(question_ids)
+    context_segments = torch.zeros_like(context_ids)
+
+    biencoder_batch = BiEncoderBatch(
+        question_ids=question_ids,
+        question_segments=question_segments,
+        context_IDs=None,  # not used
+        context_ids=context_ids,
+        ctx_segments=context_segments,
+        is_positive=None,  # not used
+        hard_negatives=None,  # not used
+        encoder_type=None,  # not used
+    )
+    return biencoder_batch

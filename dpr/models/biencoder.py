@@ -288,6 +288,7 @@ class BiEncoder(nn.Module):
         return BiEncoderBatch(
             questions_tensor,
             question_segments,
+            None,  # for backward compatibility
             ctxs_tensor,
             ctx_segments,
             positive_ctx_indices,
@@ -322,6 +323,7 @@ class BiEncoder(nn.Module):
         :return: BiEncoderBatch tuple
         """
         question_tensors: List[T] = []
+        ctx_ids: List[int] = []  # passage IDs
         ctx_tensors: List[T] = []
         positive_ctx_indices = []
         hard_neg_ctx_indices = []
@@ -360,6 +362,11 @@ class BiEncoder(nn.Module):
 
             current_ctxs_len = len(ctx_tensors)
 
+            # Context IDs
+            ctx_id = [ctx.id for ctx in all_ctxs]
+            ctx_ids.extend(ctx_id)
+
+            # Context tensors
             sample_ctxs_tensors = [
                 tensorizer.concatenate_inputs(
                     ids={"passage_title": list(ctx.title_ids), "passage": list(ctx.text_ids)},
@@ -368,8 +375,8 @@ class BiEncoder(nn.Module):
                 )
                 for ctx in all_ctxs
             ]
-
             ctx_tensors.extend(sample_ctxs_tensors)
+
             positive_ctx_indices.append(current_ctxs_len)
             hard_neg_ctx_indices.append(
                 [
@@ -389,6 +396,7 @@ class BiEncoder(nn.Module):
                 )
             )
 
+        ctx_ids = torch.tensor(ctx_ids, dtype=torch.int64)
         ctxs_tensor = torch.cat([ctx.view(1, -1) for ctx in ctx_tensors], dim=0)
         questions_tensor = torch.cat([q.view(1, -1) for q in question_tensors], dim=0)
 
@@ -398,6 +406,7 @@ class BiEncoder(nn.Module):
         return BiEncoderBatch(
             questions_tensor,
             question_segments,
+            ctx_ids,
             ctxs_tensor,
             ctx_segments,
             positive_ctx_indices,
@@ -659,9 +668,9 @@ def _select_span_with_token(
             if query_tensor[0] != cls_id:
                 query_tensor = torch.cat([torch.tensor([cls_id]), query_tensor], dim=0)
 
-            from dpr.models.reader import _pad_to_len
+            from dpr.models.reader import pad_to_len
 
-            query_tensor = _pad_to_len(
+            query_tensor = pad_to_len(
                 query_tensor, tensorizer.get_pad_id(), tensorizer.max_length
             )
             query_tensor[-1] = tensorizer.tokenizer.sep_token_id
