@@ -214,6 +214,11 @@ class OneForAllTrainer(object):
         logger.info(" Total updates=%d", total_updates)
         warmup_steps = cfg.train.warmup_steps
 
+        reader_num_sub_batches = cfg.train.reader_num_sub_batches
+        retriever_batch_size = cfg.train.batch_size
+        reader_sub_batch_size = math.ceil(retriever_batch_size / reader_num_sub_batches)
+        reader_num_sub_batches = math.ceil(retriever_batch_size / reader_sub_batch_size)
+
         if self.biencoder_scheduler_state:
             # TODO: ideally we'd want to just call
             # scheduler.load_state_dict(self.scheduler_state)
@@ -234,16 +239,20 @@ class OneForAllTrainer(object):
             logger.info("Steps shift %d", shift)
             self.reader_scheduler = get_schedule_linear(
                 self.reader_optimizer,
-                warmup_steps,
-                total_updates,
+                warmup_steps * reader_num_sub_batches,
+                total_updates * reader_num_sub_batches,
                 steps_shift=shift,
             )
         else:
             self.biencoder_scheduler = get_schedule_linear(
-                self.biencoder_optimizer, warmup_steps, total_updates
+                self.biencoder_optimizer,
+                warmup_steps,
+                total_updates,
             )
             self.reader_scheduler = get_schedule_linear(
-                self.reader_optimizer, warmup_steps, total_updates
+                self.reader_optimizer,
+                warmup_steps * reader_num_sub_batches,
+                total_updates * reader_num_sub_batches,
             )
 
         eval_step = math.ceil(updates_per_epoch / cfg.train.eval_per_epoch)
