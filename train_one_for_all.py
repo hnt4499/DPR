@@ -496,6 +496,7 @@ class OneForAllTrainer(object):
                 biencoder_batch_j = BiEncoderBatch(
                     question_ids=q_ids,
                     question_segments=q_segments,
+                    context_IDs=None,  # not used
                     context_ids=ctx_ids_batch,
                     ctx_segments=ctx_seg_batch,
                     is_positive=None,  # not used

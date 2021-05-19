@@ -406,6 +406,7 @@ class BiEncoder(nn.Module):
         return BiEncoderBatch(
             questions_tensor,
             question_segments,
+            None,  # for backward compatibility
             ctx_ids,
             ctxs_tensor,
             ctx_segments,
