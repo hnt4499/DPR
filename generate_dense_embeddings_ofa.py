@@ -114,6 +114,7 @@ def main(cfg: DictConfig):
     )
 
     encoder = ofa_model.biencoder.ctx_model if cfg.encoder_type == "ctx" else ofa_model.biencoder.question_model
+    del ofa_model
 
     encoder, _ = setup_for_distributed_mode(
         encoder,
