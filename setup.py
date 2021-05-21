@@ -64,6 +64,7 @@ setup(
         "omegaconf>=2.0.1",
         "nltk==3.6.2",
         "jsonlines",
+        "pandas",
     ],
     cmdclass={  # post install commands
         'develop': PostDevelopCommand,
