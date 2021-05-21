@@ -200,6 +200,15 @@ def load_states_from_checkpoint(model_file: str) -> CheckpointState:
     return CheckpointState(**state_dict)
 
 
+def load_states_from_checkpoint_ofa(model_file: str) -> CheckpointStateOFA:
+    logger.info("Reading saved OFA model from %s", model_file)
+    state_dict = torch.load(
+        model_file, map_location=lambda s, l: default_restore_location(s, "cpu")
+    )
+    logger.info("model_state_dict keys %s", state_dict.keys())
+    return CheckpointStateOFA(**state_dict)
+
+
 def load_state_dict_to_model(model: nn.Module, state_dict: dict):
     model_keys = set(model.state_dict().keys())
     pretrained_model_keys = set(state_dict.keys())

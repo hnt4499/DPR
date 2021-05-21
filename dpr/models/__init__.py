@@ -127,14 +127,14 @@ def init_hf_bert_simple_ofa(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
     from .hf_models_simple_one_for_all import get_bert_one_for_all_components
-    return get_bert_one_for_all_components(args)
+    return get_bert_one_for_all_components(args, **kwargs)
 
 
 def init_hf_bert_ofa_with_passage_scores(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
     from .hf_models_ofa_with_passage_scores import get_bert_one_for_all_components
-    return get_bert_one_for_all_components(args)
+    return get_bert_one_for_all_components(args, **kwargs)
 
 
 OFA_INITIALIZERS = {
