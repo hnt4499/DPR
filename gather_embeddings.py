@@ -23,6 +23,8 @@ from omegaconf import DictConfig
 
 @hydra.main(config_path="conf", config_name="gather_embeddings")
 def main(cfg: DictConfig):
+    os.makedirs(cfg.dst_dir, exist_ok=True)
+
     for src_path in Path(cfg.src_dir).rglob(cfg.pattern):
         _, filename = os.path.split(src_path)
         dst_path = os.path.join(cfg.dst_dir, filename)
