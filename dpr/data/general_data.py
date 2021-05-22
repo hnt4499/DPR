@@ -95,6 +95,7 @@ class GeneralDataset(torch.utils.data.Dataset):
         num_workers: int,
         debugging: bool = False,
         load_data: bool = True,
+        check_pre_tokenized_data: bool = True,
     ):
         """Initialize general dataset.
 
@@ -110,6 +111,8 @@ class GeneralDataset(torch.utils.data.Dataset):
             preprocessing while other processes wait for its results.
         :param num_workers: number of workers for the preprocessing step.
         :param load_data: whether to load pre-processes data into memory. Disable this if you want to pre-process data only
+        :param check_pre_tokenized_data: whether to check if the pre-tokenized context data is the same as original
+            context passage after tokenized.
         """
         self.files = files
         self.bm25_retrieval_file = bm25_retrieval_file
@@ -123,6 +126,7 @@ class GeneralDataset(torch.utils.data.Dataset):
         self.num_workers = num_workers
         self.debugging = debugging
         self.load_data_ = load_data
+        self.check_pre_tokenized_data = check_pre_tokenized_data
 
     def __getitem__(self, index: int) -> DataSample:
         return self.data[index]
@@ -189,6 +193,7 @@ class GeneralDataset(torch.utils.data.Dataset):
                 self.gold_passages_src,
                 self.gold_passages_processed,
                 self.tensorizer,
+                self.check_pre_tokenized_data,
                 num_workers=self.num_workers,
                 debugging=self.debugging,
             )
@@ -219,6 +224,7 @@ def preprocess_retriever_results(
     gold_passages_file: str,
     gold_passages_processed_file: str,
     tensorizer: Tensorizer,
+    check_pre_tokenized_data: bool = True,
     num_workers: int = 8,
     double_check: bool = True,
     debugging: bool = False,
@@ -238,6 +244,8 @@ def preprocess_retriever_results(
         contains original gold passages, this file should contain processed, matched, 100-word split passages that match
         with the original gold passages.
     :param tensorizer: Tensorizer object for text to model input tensors conversions
+    :param check_pre_tokenized_data: whether to check if the pre-tokenized context data is the same as original
+        context passage after tokenized.
     :param num_workers: the number of parallel processes for conversion
     :param double_check: double check whether the pre-tokenized tokens are correct
     :return: path to serialized, preprocessed pickle files
@@ -296,6 +304,8 @@ def preprocess_retriever_results(
         gold_passages_processed_file=gold_passages_processed_file,
         tensorizer=tensorizer,
         is_train_set=is_train_set,
+        check_pre_tokenized_data=check_pre_tokenized_data,
+
     )
     serialized_files = []
     for file_name in workers.map(_parse_batch, chunks):
@@ -315,6 +325,7 @@ def _preprocess_samples_by_chunk(
     gold_passages_processed_file: str,
     tensorizer: Tensorizer,
     is_train_set: bool,
+    check_pre_tokenized_data: bool,
 ) -> str:
     chunk_id, samples, bm25_samples = samples
     logger.info("Start batch %d", len(samples))
@@ -326,6 +337,7 @@ def _preprocess_samples_by_chunk(
         gold_passages_processed_file,
         tensorizer,
         is_train_set=is_train_set,
+        check_pre_tokenized_data=check_pre_tokenized_data,
     )
 
     # Gather results
@@ -389,6 +401,7 @@ def _preprocess_retriever_data(
     tensorizer: Tensorizer,
     cfg: PreprocessingCfg = DEFAULT_PREPROCESSING_CFG_TRAIN,
     is_train_set: bool = True,
+    check_pre_tokenized_data: bool = True,
 ) -> Iterable[DataSample]:
     """
     Converts retriever results into general retriever/reader training data.
@@ -407,7 +420,10 @@ def _preprocess_retriever_data(
     gold_passage_map, canonical_questions = (
         _get_gold_ctx_dict(gold_info_file) if gold_info_file is not None else ({}, {})
     )
-    processed_gold_passage_map = _get_processed_gold_ctx_dict(gold_info_processed_file)
+    processed_gold_passage_map = (
+        _get_processed_gold_ctx_dict(gold_info_processed_file) if gold_info_processed_file else {}
+    )
+
 
     number_no_positive_samples = 0
     number_samples_from_gold = 0
@@ -451,6 +467,7 @@ def _preprocess_retriever_data(
             processed_gold_passage_map,
             cfg,
             is_train_set,
+            check_pre_tokenized_data,
         )
         gold_passages = passages[0]
         positive_passages, negative_passages, distantly_positive_passages = passages[1:4]
@@ -506,6 +523,7 @@ def _select_passages(
     processed_gold_passage_map: Dict[str, DataPassage],
     cfg: PreprocessingCfg,
     is_train_set: bool,
+    check_pre_tokenized_data: bool,
 ) -> Tuple[
     List[DataPassage], List[DataPassage], List[DataPassage], List[DataPassage],
     List[DataPassage], List[DataPassage], List[DataPassage]
@@ -528,7 +546,7 @@ def _select_passages(
             gold_ctx = processed_gold_passage_map[processed_question]
 
         gold_ctx = _load_tokens_into_ctx(
-            gold_ctx, question_token_ids, wiki_data, tensorizer
+            gold_ctx, question_token_ids, wiki_data, tensorizer, check_pre_tokenized_data,
         )  # load question, passage title and passage tokens into the context object
         gold_ctx = _find_answer_spans(
             tensorizer, gold_ctx, question, all_answers, answers_token_ids,
@@ -546,7 +564,7 @@ def _select_passages(
     # Densely retrieved contexts
     ctxs = [DataPassage(is_from_bm25=False, **ctx) for ctx in sample["ctxs"]]
     ctxs = [
-        _load_tokens_into_ctx(ctx, question_token_ids, wiki_data, tensorizer)
+        _load_tokens_into_ctx(ctx, question_token_ids, wiki_data, tensorizer, check_pre_tokenized_data)
         for ctx in ctxs
     ]  # load question, passage title and passage tokens into the context object
     # Find answer spans for all passages
@@ -566,7 +584,7 @@ def _select_passages(
         for passage_id, score in bm25_sample
     ]
     bm25_ctxs = [
-        _load_tokens_into_ctx(ctx, question_token_ids, wiki_data, tensorizer)
+        _load_tokens_into_ctx(ctx, question_token_ids, wiki_data, tensorizer, check_pre_tokenized_data)
         for ctx in bm25_ctxs
     ]  # load question, passage title and passage tokens into the context object
     # Find answer spans for all passages
@@ -675,6 +693,7 @@ def _load_tokens_into_ctx(
     question_token_ids: np.ndarray,
     wiki_data: TokenizedWikipediaPassages,
     tensorizer: Tensorizer,
+    check_pre_tokenized_data: bool = True,
 ) -> DataPassage:
     tokens = wiki_data.get_tokenized_data(int(ctx.id))
 
@@ -683,8 +702,8 @@ def _load_tokens_into_ctx(
         orig_passage_ids = tensorizer.text_to_tensor(
             ctx.passage_text, add_special_tokens=False,
         ).numpy()
-        if len(orig_passage_ids) != len(tokens["passage_token_ids"]) or \
-                not (orig_passage_ids == tokens["passage_token_ids"]).all():
+        if check_pre_tokenized_data and (len(orig_passage_ids) != len(tokens["passage_token_ids"]) or \
+                not (orig_passage_ids == tokens["passage_token_ids"]).all()):
             raise ValueError(
                 f"Passage token mismatch: id: {ctx.id}, orig: {orig_passage_ids}, "
                 f"pre-processed: {tokens['passage_token_ids']}. If the sequence lengths are different,"
@@ -695,8 +714,8 @@ def _load_tokens_into_ctx(
         orig_title_ids = tensorizer.text_to_tensor(
             ctx.title, add_special_tokens=False,
         ).numpy()
-        if len(orig_title_ids) != len(tokens["title_token_ids"]) or \
-                not (orig_title_ids == tokens["title_token_ids"]).all():
+        if check_pre_tokenized_data and (len(orig_title_ids) != len(tokens["title_token_ids"]) or \
+                not (orig_title_ids == tokens["title_token_ids"]).all()):
             raise ValueError(
                 f"Passage title token mismatch: id: {ctx.id}, orig: {orig_title_ids}, "
                 f"pre-processed: {tokens['title_token_ids']}. If the sequence lengths are different,"

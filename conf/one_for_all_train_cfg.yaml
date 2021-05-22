@@ -44,6 +44,10 @@ gradient_checkpointing: False
 ignore_checkpoint_offset: False
 ignore_checkpoint_optimizer: False
 
+# Effective only during evaluation-only mode (i.e., no training file is specified)
+evaluate_retriever: true
+evaluate_reader: true
+
 
 # Model-specific configs
 

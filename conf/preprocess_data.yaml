@@ -11,7 +11,7 @@ seed: 42
 # ========================================== TRAIN ==================================================
 
 # glob expression for train data files
-train_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new/train.json
+train_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new-2/train.json
 
 # File with the original train dataset passages (json format)
 gold_passages_src: /data/tuyen/openqa/DPR/downloads/data/gold_passages_info/nq_train.json
@@ -25,7 +25,7 @@ bm25_retrieval_results: /data/tuyen/openqa/DPR/downloads/data/retriever/nq-train
 # =========================================== DEV ===================================================
 
 # glob expression for dev data files
-dev_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new/dev.json
+dev_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new-2/dev.json
 
 # File with the original dataset passages (json format)
 gold_passages_src_dev: /data/tuyen/openqa/DPR/downloads/data/gold_passages_info/nq_dev.json
@@ -54,6 +54,8 @@ num_workers: 4
 
 # a list of tokens to avoid tokenization
 special_tokens:
+
+check_pre_tokenized_data: True
 
 # Debug
 debugging: False

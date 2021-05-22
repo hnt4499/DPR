@@ -64,7 +64,7 @@ from dpr.utils.model_utils import (
     CheckpointStateOFA,
     get_model_file,
     get_model_obj,
-    load_states_from_checkpoint,
+    load_states_from_checkpoint_ofa,
 )
 
 from dpr.models.reader import gather as _gather_reader
@@ -93,7 +93,7 @@ class OneForAllTrainer(object):
         model_file = get_model_file(cfg, cfg.checkpoint_file_name)
         saved_state = None
         if model_file:
-            saved_state = load_states_from_checkpoint(model_file)
+            saved_state = load_states_from_checkpoint_ofa(model_file)
             set_cfg_params_from_state(saved_state.encoder_params, cfg)
 
         gradient_checkpointing = getattr(cfg, "gradient_checkpointing", False)
@@ -968,12 +968,16 @@ def main(cfg: DictConfig):
     if cfg.train_datasets and len(cfg.train_datasets) > 0:
         trainer.run_train()
     elif cfg.model_file and cfg.dev_datasets:
-        logger.info(
-            "No train files are specified. Run 2 types of validation for specified model file"
-        )
-        trainer.validate_biencoder_nll()
-        trainer.validate_biencoder_average_rank()
-        trainer.validate_reader()
+        logger.info("No train files are specified.")
+
+        if cfg.evaluate_retriever:
+            logger.info("Run 2 types of retriever validation for specified model file")
+            trainer.validate_biencoder_nll()
+            trainer.validate_biencoder_average_rank()
+
+        if cfg.evaluate_reader:
+            logger.info("Run reader validation for specified model file")
+            trainer.validate_reader()
     else:
         logger.warning(
             "Neither train_file or (model_file & dev_file) parameters are specified. Nothing to do."

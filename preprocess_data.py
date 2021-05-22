@@ -54,10 +54,6 @@ class PreProcessor(object):
             if not is_train:
                 gold_passages_src = self.cfg.gold_passages_src_dev
 
-            assert os.path.exists(
-                gold_passages_src
-            ), "Please specify valid gold_passages_src/gold_passages_src_dev"
-
         # Processed, 100-word split gold passages
         gold_passages_processed = (self.cfg.gold_passages_processed if is_train
                                    else self.cfg.gold_passages_processed_dev)
@@ -78,6 +74,7 @@ class PreProcessor(object):
             num_workers=self.cfg.num_workers,
             debugging=self.debugging,
             load_data=False,
+            check_pre_tokenized_data=self.cfg.check_pre_tokenized_data
         )
 
         dataset.load_data()

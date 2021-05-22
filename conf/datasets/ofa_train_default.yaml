@@ -14,6 +14,13 @@ nq_dev_ofa:  # contains both BM25 negatives and dense hard negatives
   shuffle_positives: False
   only_gold: True
 
+nq_test_ofa:  # contains both BM25 negatives and dense hard negatives
+  _target_: dpr.data.biencoder_data.OneForAllDataset
+  mode: both
+  file: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new-2/test.json
+  shuffle_positives: False
+  only_gold: False
+
 
 # ================================= Debugging datasets ===================================
 
