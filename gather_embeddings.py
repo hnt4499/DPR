@@ -20,7 +20,6 @@ import hydra
 from omegaconf import DictConfig
 
 
-
 @hydra.main(config_path="conf", config_name="gather_embeddings")
 def main(cfg: DictConfig):
     os.makedirs(cfg.dst_dir, exist_ok=True)
@@ -33,7 +32,12 @@ def main(cfg: DictConfig):
 
 
 if __name__ == "__main__":
-    hydra_formatted_args = []
+    hydra_formatted_args = [  # see https://stackoverflow.com/a/65172027
+        "hydra.run.dir=.",
+        "hydra.output_subdir=null",
+        "hydra/job_logging=disabled",
+        "hydra/hydra_logging=disabled",
+    ]
     for arg in sys.argv:
         if arg.startswith("--"):
             hydra_formatted_args.append(arg[len("--") :])

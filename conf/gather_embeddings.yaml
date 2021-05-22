@@ -1,10 +1,3 @@
-hydra:
-  run:
-    dir: ./
-
-hydra/job_logging: disabled
-hydra/hydra_logging: disabled
-
 src_dir:
 dst_dir:
 pattern:
