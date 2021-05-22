@@ -32,16 +32,17 @@ def main(cfg: DictConfig):
 
 
 if __name__ == "__main__":
-    hydra_formatted_args = [  # see https://stackoverflow.com/a/65172027
-        "hydra.run.dir=.",
-        "hydra.output_subdir=null",
-        "hydra/job_logging=disabled",
-        "hydra/hydra_logging=disabled",
-    ]
+    hydra_formatted_args = []
     for arg in sys.argv:
         if arg.startswith("--"):
             hydra_formatted_args.append(arg[len("--") :])
         else:
             hydra_formatted_args.append(arg)
+    hydra_formatted_args.extend([ # see https://stackoverflow.com/a/65172027
+        "hydra.run.dir=.",
+        "hydra.output_subdir=null",
+        "hydra/job_logging=disabled",
+        "hydra/hydra_logging=disabled",
+    ])
     sys.argv = hydra_formatted_args
     main()
