@@ -12,7 +12,7 @@ nq_dev_ofa:  # contains both BM25 negatives and dense hard negatives
   mode: both
   file: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new-2/dev.json
   shuffle_positives: False
-  only_gold: True
+  only_gold: False  # TODO: retriever data always have gold, while reader data is not
 
 nq_test_ofa:  # contains both BM25 negatives and dense hard negatives
   _target_: dpr.data.biencoder_data.OneForAllDataset

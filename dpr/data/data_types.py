@@ -299,6 +299,7 @@ ReaderTrainingConfig = collections.namedtuple(
     [
         "use_simple_loss",
         "average_loss",
+        "do_softmax_before_score_scaling",
     ],
 )
 

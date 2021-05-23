@@ -672,6 +672,8 @@ def _select_passages(
                 logger.warning(f"Question '{question}' has no gold positive")
 
     else:
+        # NOTE: See `create_reader_input` function in `reader.py` to see how
+        # positive and negative samples are merged (keeping their original order)
         selected_positive_ctxs = positive_samples
         selected_negative_ctxs = negative_samples
         selected_bm25_positive_ctxs = bm25_positive_samples

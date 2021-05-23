@@ -149,6 +149,14 @@ class OneForAllTrainer(object):
                 reader_optimizer = None
                 forward_fn = ofa_simple_fw_pass  # always the simplest
 
+        else:
+            self.mode = "normal"
+            # Initialize everything
+            gradient_checkpointing = getattr(cfg, "gradient_checkpointing", False)
+            tensorizer, model, biencoder_optimizer, reader_optimizer, forward_fn = init_ofa_model(
+                cfg.encoder.encoder_model_type, cfg, gradient_checkpointing=gradient_checkpointing,
+            )
+
         model, (biencoder_optimizer, reader_optimizer) = setup_for_distributed_mode(
             model,
             [biencoder_optimizer, reader_optimizer],
@@ -666,6 +674,7 @@ class OneForAllTrainer(object):
             reader_training_config = ReaderTrainingConfig(
                 use_simple_loss=cfg.reader.use_simple_loss,
                 average_loss=cfg.reader.average_loss,
+                do_softmax_before_score_scaling=cfg.reader.do_softmax_before_score_scaling,
             )
 
             # Get the token to be used for representation selection
@@ -891,6 +900,7 @@ class OneForAllTrainer(object):
             reader_training_config = ReaderTrainingConfig(
                 use_simple_loss=cfg.reader.use_simple_loss,
                 average_loss=cfg.reader.average_loss,
+                do_softmax_before_score_scaling=cfg.reader.do_softmax_before_score_scaling,
             )
 
             step = (i + 1) % self.cfg.train.gradient_accumulation_steps == 0  # whether to `step()` now

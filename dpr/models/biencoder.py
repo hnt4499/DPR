@@ -333,6 +333,9 @@ class BiEncoder(nn.Module):
         assert query_token is None
 
         for sample in samples:
+            # Skip samples without positive passges (either gold or distant positives)
+            if len(sample.positive_passages) == 0:
+                continue
             # ctx+ & [ctx-] composition
             # as of now, take the first(gold) ctx+ only
 

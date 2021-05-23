@@ -76,3 +76,4 @@ reader:
 
   use_simple_loss: False
   average_loss: False
+  do_softmax_before_score_scaling: False

@@ -91,6 +91,7 @@ class SimpleOneForAllModel(nn.Module):
                 use_simple_loss=reader_config.use_simple_loss,
                 average_loss=reader_config.average_loss,
                 passage_scores=reader_batch.passage_scores,
+                do_softmax_before_score_scaling=reader_config.do_softmax_before_score_scaling,
             )
             if isinstance(reader_out, tuple):
                 start_logits, end_logits, relevance_logits = reader_out

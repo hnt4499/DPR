@@ -15,6 +15,7 @@ from typing import List, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.nn import functional as F
 from torch import Tensor as T
 from torch.nn import CrossEntropyLoss
 
@@ -37,36 +38,60 @@ class Reader(nn.Module):
         self.qa_classifier = nn.Linear(hidden_size, 1)
         init_weights([self.qa_outputs, self.qa_classifier])
 
-    def forward(self, input_ids: T, attention_mask: T, start_positions=None, end_positions=None, answer_mask=None,
-                use_simple_loss: bool = False, average_loss: bool = False, passage_scores: T = None):
+    def forward(
+        self,
+        input_ids: T,
+        attention_mask: T,
+        start_positions=None,
+        end_positions=None,
+        answer_mask=None,
+        use_simple_loss: bool = False,
+        average_loss: bool = False,
+        passage_scores: T = None,
+        do_softmax_before_score_scaling: bool = False,  # whether to normalize logits and passage scores before scaling
+    ):
         # notations: N - number of questions in a batch, M - number of passages per questions, L - sequence length
         N, M, L = input_ids.size()
         input_ids = input_ids.view(N * M, L)
         attention_mask = attention_mask.view(N * M, L)
         if passage_scores is not None:
-            passage_scores = passage_scores.view(N * M, 1, 1)
+            passage_scores = passage_scores.view(N * M, 1)
 
-        start_logits, end_logits, relevance_logits = self._forward(input_ids, attention_mask, passage_scores=passage_scores)
+        start_logits, end_logits, relevance_logits = self._forward(
+            input_ids,
+            attention_mask,
+            passage_scores=passage_scores,
+            do_softmax_before_score_scaling=do_softmax_before_score_scaling,
+        )
         if self.training:
             return compute_loss(start_positions, end_positions, answer_mask, start_logits, end_logits, relevance_logits,
                                 N, M, use_simple_loss=use_simple_loss, average=average_loss)
 
         return start_logits.view(N, M, L), end_logits.view(N, M, L), relevance_logits.view(N, M)
 
-    def _forward(self, input_ids, attention_mask, passage_scores=None):
+    def _forward(self, input_ids, attention_mask, passage_scores=None, do_softmax_before_score_scaling=False):
         # TODO: provide segment values
         sequence_output = self.encoder(input_ids, None, attention_mask)[0]  # (N * M, L, H)
         logits = self.qa_outputs(sequence_output)  # (N * M, L, 2)
-
-        # Retriever-reader interaction via passage scores
-        if passage_scores is not None:
-            logits = logits * passage_scores  # (N * M, L, 2)
 
         start_logits, end_logits = logits.split(1, dim=-1)  # (N * M, L, 1), (N * M, L, 1)
         start_logits = start_logits.squeeze(-1)  # (N * M, L)
         end_logits = end_logits.squeeze(-1)  # (N * M, L)
 
-        rank_logits = self.qa_classifier(sequence_output[:, 0, :])
+        rank_logits = self.qa_classifier(sequence_output[:, 0, :])  # (N * M, 1)
+
+        # Retriever-reader interaction via passage scores
+        if passage_scores is not None:
+
+            if do_softmax_before_score_scaling:
+                # `start_logits` and `end_logits` do not need to be normalized, since
+                # they are passage-independent.
+                passage_scores = F.softmax(passage_scores, dim=0)  # (N * M, 1)
+                rank_logits = F.softmax(rank_logits, dim=0)  # (N * M, 1)
+
+            start_logits = start_logits * passage_scores  # (N * M, L)
+            end_logits = end_logits * passage_scores  # (N * M, L)
+            rank_logits = rank_logits * passage_scores  # (N * M, 1)
 
         return start_logits, end_logits, rank_logits
 
@@ -201,7 +226,9 @@ def compute_loss(start_positions, end_positions, answer_mask, start_logits, end_
     end_positions.clamp_(0, ignored_index)
     loss_fct = CrossEntropyLoss(reduce=False, ignore_index=ignored_index)
 
-    # compute switch loss
+    # compute switch loss; switch labels are all zero since positive passages
+    # are always at the front of each sample during training (see `_create_question_passages_tensors`
+    # function below)
     relevance_logits = relevance_logits.view(N, M)  # (N, M)
     switch_labels = torch.zeros(N, dtype=torch.long).to(start_logits.device)  # (N,)
     switch_loss = torch.sum(loss_fct(relevance_logits, switch_labels))  # scalar
@@ -257,8 +284,14 @@ def create_reader_input(
     empty_sequence = torch.Tensor().new_full((max_length,), tensorizer.get_pad_id(), dtype=torch.long)
 
     for sample in samples:
-        positive_ctxs = sample.positive_passages if is_train else []
-        negative_ctxs = sample.negative_passages if is_train else sample.positive_passages + sample.negative_passages
+        if is_train:
+            positive_ctxs = sample.positive_passages
+            negative_ctxs = sample.negative_passages
+        else:
+            positive_ctxs = []
+            negative_ctxs = sample.positive_passages + sample.negative_passages
+            # Need to re-sort samples based on their scores
+            negative_ctxs = sorted(negative_ctxs, key=lambda x: x.score, reverse=True)
         question_token_ids = sample.question_token_ids
 
         sample_tensors = _create_question_passages_tensors(
@@ -512,9 +545,12 @@ def get_best_prediction(
     for q in range(questions_num):
         sample = samples_batch[q]
 
+        # Need to re-sort samples based on their scores; see `create_reader_input` function
         all_passages = sample.positive_passages + sample.negative_passages
+        all_passages = sorted(all_passages, key=lambda x: x.score, reverse=True)
+
         non_empty_passages_num = len(all_passages)
-        nbest = []
+        nbest: List[SpanPrediction] = []
         for p in range(passages_per_question):
             passage_idx = idxs[q, p].item()
             if (
@@ -552,6 +588,7 @@ def get_best_prediction(
         if passage_thresholds:
             passage_rank_matches = {}
             for n in passage_thresholds:
+                # By this, it only selects
                 curr_nbest = [pred for pred in nbest if pred.passage_index < n]
                 passage_rank_matches[n] = curr_nbest[0]
             predictions = passage_rank_matches
