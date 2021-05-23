@@ -7,8 +7,11 @@
 
 
 """
- Pipeline to train DPR One-for-all model. This script is largely edited from `train_dense_encoder.py`
- and not cleaned up well (biencoder's artifacts might still be somewhere in the script).
+Pipeline to train DPR One-for-all model. This script is largely edited from `train_dense_encoder.py`
+and not cleaned up well (biencoder's artifacts might still be somewhere in the script).
+
+This script also allows evaluating old models (which does not use general dataset scheme)
+with using new dataset scheme.
 """
 
 import logging
@@ -24,16 +27,17 @@ from collections import defaultdict
 import hydra
 import torch
 from omegaconf import DictConfig, OmegaConf
-from torch import nn
 import numpy as np
 
-from dpr.models import init_ofa_model, init_loss
+from dpr.models import init_ofa_model, init_biencoder_components, init_reader_components, init_loss
+from dpr.utils.legacy_utils import load_states_from_checkpoint_legacy, convert_from_old_state_to_ofa
 from dpr.models.biencoder import BiEncoderNllLoss
 from dpr.data.data_types import (
     BiEncoderBatch,
     BiEncoderDataConfig,
+    BiEncoderPredictionBatch,
     BiEncoderTrainingConfig,
-    ReaderBatch ,
+    ReaderBatch,
     ReaderDataConfig,
     ReaderSample,
     ReaderTrainingConfig,
@@ -42,12 +46,13 @@ from dpr.data.data_types import (
 )
 from dpr.utils.conf_utils import OneForAllDatasetsCfg
 from dpr.data.general_data import GeneralDatasetScheme
-from dpr.data.biencoder_data import Dataset, DEFAULT_SELECTOR
+from dpr.data.biencoder_data import Dataset, DEFAULT_SELECTOR, RepStaticPosTokenSelector
 from dpr.utils.data_utils import (
     ShardedDataIterator,
     MultiSetDataIterator,
 )
-from dpr.models.one_for_all_base import create_ofa_input
+from dpr.models.one_for_all_base import create_ofa_input, SimpleOneForAllModel
+from dpr.models.hf_models_simple_one_for_all import do_ofa_fwd_pass as ofa_simple_fw_pass
 
 from dpr.options import (
     setup_cfg_gpu,
@@ -58,13 +63,13 @@ from dpr.options import (
 )
 from dpr.utils.dist_utils import all_gather_list
 from dpr.utils.model_utils import (
+    CheckpointState,
     setup_for_distributed_mode,
     move_to_device,
     get_schedule_linear,
     CheckpointStateOFA,
     get_model_file,
     get_model_obj,
-    load_states_from_checkpoint_ofa,
 )
 
 from dpr.models.reader import gather as _gather_reader
@@ -93,13 +98,56 @@ class OneForAllTrainer(object):
         model_file = get_model_file(cfg, cfg.checkpoint_file_name)
         saved_state = None
         if model_file:
-            saved_state = load_states_from_checkpoint_ofa(model_file)
+            saved_state = load_states_from_checkpoint_legacy(model_file)
             set_cfg_params_from_state(saved_state.encoder_params, cfg)
 
-        gradient_checkpointing = getattr(cfg, "gradient_checkpointing", False)
-        tensorizer, model, biencoder_optimizer, reader_optimizer, forward_fn = init_ofa_model(
-            cfg.encoder.encoder_model_type, cfg, gradient_checkpointing=gradient_checkpointing,
-        )
+            if isinstance(saved_state, CheckpointStateOFA):
+                self.mode = "normal"
+                # Initialize everything
+                gradient_checkpointing = getattr(cfg, "gradient_checkpointing", False)
+                tensorizer, model, biencoder_optimizer, reader_optimizer, forward_fn = init_ofa_model(
+                    cfg.encoder.encoder_model_type, cfg, gradient_checkpointing=gradient_checkpointing,
+                )
+
+            else:
+                # Only allowed during evaluation-only mode
+                assert isinstance(saved_state, CheckpointState)
+                assert cfg.train_datasets is None or len(cfg.train_datasets) == 0
+                # Convert from old state to OFA state
+                saved_state, self.mode = convert_from_old_state_to_ofa(saved_state)
+
+                if self.mode == "biencoder":
+                    # Sanity check
+                    assert cfg.evaluate_retriever and (not cfg.evaluate_reader)
+                    # Initialize everything
+                    tensorizer, biencoder, _ = init_biencoder_components(
+                        cfg.encoder.encoder_model_type, cfg, inference_only=True,
+                    )
+                    reader = None
+                else:
+                    # Sanity check
+                    assert cfg.evaluate_reader and (not cfg.evaluate_retriever)
+                    # Initialize everything
+                    tensorizer, reader, _ = init_reader_components(
+                        cfg.encoder.encoder_model_type, cfg, inference_only=True,
+                    )
+                    biencoder = None
+
+                # Create a "fake" one-for-all model
+                model = SimpleOneForAllModel(
+                    biencoder=biencoder, reader=reader, tensorizer=tensorizer,
+                )
+
+                # Modify config
+                cfg.ignore_checkpoint_optimizer = True
+                cfg.ignore_checkpoint_offset = True
+                cfg.gradient_checkpointing = False
+                cfg.fp16 = False
+                # Place holder for backward compatibility
+                gradient_checkpointing = False
+                biencoder_optimizer = None
+                reader_optimizer = None
+                forward_fn = ofa_simple_fw_pass  # always the simplest
 
         model, (biencoder_optimizer, reader_optimizer) = setup_for_distributed_mode(
             model,
@@ -458,7 +506,6 @@ class OneForAllTrainer(object):
             bsz = ctxs_ids.size(0)
 
             # Get the token to be used for representation selection
-            encoder_type = ds_cfg.encoder_type
             rep_positions_q = ds_cfg.selector.get_positions(
                 biencoder_batch.question_ids, self.tensorizer, self.model
             )
@@ -505,13 +552,19 @@ class OneForAllTrainer(object):
                 )
 
                 with torch.no_grad():
-                    q_dense, ctx_dense = self.model(
+                    biencoder_preds: BiEncoderPredictionBatch = self.forward_fn(
+                        trainer=self,
                         mode="retriever",
-                        biencoder_batch=biencoder_batch_j,
+                        backward=False,
+                        step=False,
+                        biencoder_input=biencoder_batch_j,
                         biencoder_config=biencoder_training_config,
-                        reader_batch=None,
+                        reader_inputs=None,
                         reader_config=None,
+                        inference_only=True,
                     )
+                    q_dense = biencoder_preds.question_vector
+                    ctx_dense = biencoder_preds.context_vector
 
                 if q_dense is not None:
                     q_represenations.extend(q_dense.cpu().split(1, dim=0))
@@ -579,14 +632,16 @@ class OneForAllTrainer(object):
                 cfg.train.dev_batch_size, False, shuffle=False, rank=cfg.local_rank
             )
 
-        log_result_step = cfg.train.log_batch_step // 4  # validation needs to be more verbose
+        log_result_step = 1  # reader validation needs to be much more verbose
         all_results: List[ReaderQuestionPredictions] = []
+        dataset = 0  # dataset index
 
         eval_top_docs = cfg.reader.eval_top_docs
         for i, samples_batch in enumerate(self.dev_iterator.iterate_ds_data()):
 
             if isinstance(samples_batch, Tuple):
                 samples_batch, dataset = samples_batch
+            ds_cfg = self.ds_cfg.dev_datasets[dataset]
 
             # Reader data config
             reader_data_config = ReaderDataConfig(
@@ -599,7 +654,7 @@ class OneForAllTrainer(object):
             )
 
             # Prepare data
-            reader_batches = create_ofa_input(
+            reader_batches: List[ReaderBatch] = create_ofa_input(
                 mode="reader",
                 wiki_data=self.ds_cfg.wiki_data,
                 tensorizer=self.tensorizer,
@@ -613,26 +668,42 @@ class OneForAllTrainer(object):
                 average_loss=cfg.reader.average_loss,
             )
 
+            # Get the token to be used for representation selection
+            # TODO: add support for other selectors than static selector
+            assert isinstance(ds_cfg.selector, RepStaticPosTokenSelector)
+            rep_positions_q = ds_cfg.selector.get_positions(
+                None, self.tensorizer, self.model,
+            )
+            rep_positions_c = ds_cfg.selector.get_positions(
+                None, self.tensorizer, self.model
+            )
+
+            # Biencoder training config
+            biencoder_training_config = BiEncoderTrainingConfig(
+                encoder_type=ds_cfg.encoder_type,
+                rep_positions_q=rep_positions_q,
+                rep_positions_c=rep_positions_c,
+            )
+
+            # Do foward pass
+            with torch.no_grad():
+                reader_preds_batch: List[ReaderPredictionBatch] = self.forward_fn(
+                    trainer=self,
+                    mode="reader",
+                    backward=False,
+                    step=False,
+                    biencoder_input=None,
+                    biencoder_config=biencoder_training_config,
+                    reader_inputs=reader_batches,
+                    reader_config=reader_training_config,
+                    inference_only=True,
+                )
+
             start_logits, end_logits, relevance_logits = [], [], []
-
-            for reader_batch in reader_batches:
-                reader_batch = ReaderBatch(**move_to_device(reader_batch._asdict(), cfg.device))
-
-                with torch.no_grad():
-                    reader_pred_batch: ReaderPredictionBatch = self.model(
-                        mode="reader",
-                        biencoder_batch=None,
-                        biencoder_config=None,
-                        reader_batch=reader_batch,
-                        reader_config=reader_training_config,
-                    )
-                    start_logit = reader_pred_batch.start_logits
-                    end_logit = reader_pred_batch.end_logits
-                    relevance_logit = reader_pred_batch.relevance_logits
-
-                start_logits.append(start_logit)
-                end_logits.append(end_logit)
-                relevance_logits.append(relevance_logit)
+            for reader_preds in reader_preds_batch:
+                start_logits.append(reader_preds.start_logits)
+                end_logits.append(reader_preds.end_logits)
+                relevance_logits.append(reader_preds.relevance_logits)
 
             start_logits = torch.cat(start_logits, dim=0)
             end_logits = torch.cat(end_logits, dim=0)

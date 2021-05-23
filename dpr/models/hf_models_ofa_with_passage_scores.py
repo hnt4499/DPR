@@ -1,4 +1,4 @@
-from typing import Tuple, List
+from typing import Tuple, List, Union
 
 import torch
 from torch import Tensor as T
@@ -30,9 +30,26 @@ def do_ofa_fwd_pass(
     biencoder_config: BiEncoderTrainingConfig,
     reader_inputs: List[ReaderBatch],
     reader_config: ReaderTrainingConfig,
-) -> Tuple[torch.Tensor, int]:
+    inference_only: bool = False,
+) -> Union[
+    Tuple[torch.Tensor, int],
+    BiEncoderPredictionBatch,
+    List[ReaderPredictionBatch],
+    Tuple[BiEncoderPredictionBatch, List[ReaderPredictionBatch]]
+]:
+
+    """
+    Note: if `inference_only` is set to True:
+        1. No loss is computed.
+        2. No backward pass is performed.
+        3. All predictions are transformed to CPU to save memory.
+
+    Note: biencoder_config is always required (even when `mode=="reader`).
+    """
 
     assert mode in ["retriever", "reader", "both"], f"Invalid mode: {mode}"
+    if inference_only:
+        assert (not backward) and (not step) and (not trainer.model.training)
     biencoder_is_correct = 0
 
     # Forward pass and backward pass for biencoder
@@ -58,37 +75,47 @@ def do_ofa_fwd_pass(
                     reader_config=None,
                 )
 
-        # Calculate biencoder loss
-        biencoder_loss, biencoder_is_correct = calc_loss_biencoder(
-            cfg=trainer.cfg,
-            loss_function=trainer.biencoder_loss_function,
-            local_q_vector=biencoder_preds.question_vector,
-            local_ctx_vectors=biencoder_preds.context_vector,
-            local_positive_idxs=biencoder_input.is_positive,
-            local_hard_negatives_idxs=biencoder_input.hard_negatives,
-            loss_scale=None,
-        )
-        biencoder_is_correct = biencoder_is_correct.sum().item()
-        del biencoder_input  # release memory
-
-        # Re-calibrate loss
-        if trainer.cfg.n_gpu > 1:
-            biencoder_loss = biencoder_loss.mean()
-        if trainer.cfg.train.gradient_accumulation_steps > 1:
-            biencoder_loss = biencoder_loss / trainer.cfg.gradient_accumulation_steps
-
-        if backward:
-            assert trainer.model.training, "Model is not in training mode!"
-            trainer.backward(
-                loss=biencoder_loss,
-                optimizer=trainer.biencoder_optimizer,
-                scheduler=trainer.biencoder_scheduler,
-                step=step,
+        if inference_only:
+            del biencoder_input
+            biencoder_preds = BiEncoderPredictionBatch(
+                **move_to_device(biencoder_preds._asdict(), "cpu")
             )
+
+        else:
+            # Calculate biencoder loss
+            biencoder_loss, biencoder_is_correct = calc_loss_biencoder(
+                cfg=trainer.cfg,
+                loss_function=trainer.biencoder_loss_function,
+                local_q_vector=biencoder_preds.question_vector,
+                local_ctx_vectors=biencoder_preds.context_vector,
+                local_positive_idxs=biencoder_input.is_positive,
+                local_hard_negatives_idxs=biencoder_input.hard_negatives,
+                loss_scale=None,
+            )
+            biencoder_is_correct = biencoder_is_correct.sum().item()
+            del biencoder_input  # release memory
+
+            # Re-calibrate loss
+            if trainer.cfg.n_gpu > 1:
+                biencoder_loss = biencoder_loss.mean()
+            if trainer.cfg.train.gradient_accumulation_steps > 1:
+                biencoder_loss = biencoder_loss / trainer.cfg.gradient_accumulation_steps
+
+            if backward:
+                assert trainer.model.training, "Model is not in training mode!"
+                trainer.backward(
+                    loss=biencoder_loss,
+                    optimizer=trainer.biencoder_optimizer,
+                    scheduler=trainer.biencoder_scheduler,
+                    step=step,
+                )
 
     # Forward and backward pass for reader
     if mode in ["reader", "both"]:
         reader_total_loss = 0
+        if inference_only:
+            reader_preds_tot: List[ReaderPredictionBatch] = []
+
         for reader_input in reader_inputs:
 
             # First we need to forward all passages to the biencoder to get passage scores
@@ -123,7 +150,12 @@ def do_ofa_fwd_pass(
 
             question_vectors = question_vectors.view(N, 1, H)  # (N, 1, H)
             context_vectors = context_vectors.view(N, -1, H).permute(0, 2, 1)  # (N, H, M)
-            passage_scores = torch.matmul(question_vectors, context_vectors).squeeze(1)  # (N, M)
+
+            if trainer.model.training:
+                passage_scores = torch.matmul(question_vectors, context_vectors).squeeze(1)  # (N, M)
+            else:
+                with torch.no_grad():
+                    passage_scores = torch.matmul(question_vectors, context_vectors).squeeze(1)  # (N, M)
 
             reader_input = ReaderBatch(**move_to_device(reader_input._asdict(), trainer.cfg.device))
             reader_input._replace(passage_scores=passage_scores)
@@ -168,30 +200,47 @@ def do_ofa_fwd_pass(
                         reader_config=reader_config,
                     )
 
-                questions_num, passages_per_question, _ = reader_input.input_ids.size()
-                reader_total_loss = calc_loss_reader(
-                    start_positions=reader_input.start_positions,
-                    end_positions=reader_input.end_positions,
-                    answers_mask=reader_input.answers_mask,
-                    start_logits=reader_preds.start_logits,
-                    end_logits=reader_preds.end_logits,
-                    relevance_logits=reader_preds.relevance_logits,
-                    N=questions_num,
-                    M=passages_per_question,
-                    use_simple_loss=reader_config.use_simple_loss,
-                    average=reader_config.average_loss,
-                )
+                if inference_only:
+                    reader_preds = ReaderPredictionBatch(
+                        **move_to_device(reader_preds._asdict(), "cpu")
+                    )
+                    reader_preds_tot.append(reader_preds)
+
+                else:
+                    questions_num, passages_per_question, _ = reader_input.input_ids.size()
+                    reader_total_loss = calc_loss_reader(
+                        start_positions=reader_input.start_positions,
+                        end_positions=reader_input.end_positions,
+                        answers_mask=reader_input.answers_mask,
+                        start_logits=reader_preds.start_logits,
+                        end_logits=reader_preds.end_logits,
+                        relevance_logits=reader_preds.relevance_logits,
+                        N=questions_num,
+                        M=passages_per_question,
+                        use_simple_loss=reader_config.use_simple_loss,
+                        average=reader_config.average_loss,
+                    )
+
             del reader_preds  # release memory
 
-    # Total loss; for now use 1:1 weights
-    if mode == "retriever":
-        loss = biencoder_loss
-    elif mode == "reader":
-        loss = reader_total_loss
-    else:
-        loss = biencoder_loss + reader_total_loss
+    if inference_only:
+        if mode == "retriever":
+            return biencoder_preds
+        elif mode == "reader":
+            return reader_preds_tot
+        else:
+            return biencoder_preds, reader_preds_tot
 
-    return loss, biencoder_is_correct
+    else:
+        # Total loss; for now use 1:1 weights
+        if mode == "retriever":
+            loss = biencoder_loss
+        elif mode == "reader":
+            loss = reader_total_loss
+        else:
+            loss = biencoder_loss + reader_total_loss
+
+        return loss, biencoder_is_correct
 
 
 def get_bert_one_for_all_components(cfg, inference_only: bool = False, **kwargs):

@@ -216,7 +216,7 @@ def init_tenzorizer(encoder_type: str, args, **kwargs):
     return init_comp(TENSORIZER_INITIALIZERS, encoder_type, args, **kwargs)
 
 
-"""------------------------------- Loss -------------------------------"""
+"""------------------------------- Biencoder Loss -------------------------------"""
 
 
 def init_hf_bert_loss(args, **kwargs):
