@@ -52,7 +52,7 @@ from dpr.utils.data_utils import (
     MultiSetDataIterator,
 )
 from dpr.models.one_for_all_base import create_ofa_input, SimpleOneForAllModel
-from dpr.models.hf_models_simple_one_for_all import do_ofa_fwd_pass as ofa_simple_fw_pass
+from dpr.models.hf_models_ofa_simple import do_ofa_fwd_pass as ofa_simple_fw_pass
 
 from dpr.options import (
     setup_cfg_gpu,

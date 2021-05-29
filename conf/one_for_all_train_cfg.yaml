@@ -1,7 +1,7 @@
 # configuration groups
 defaults:
-  - encoder: hf_bert_simple_ofa
-  - train: hf_bert_simple_ofa
+  - encoder: hf_bert_ofa_simple
+  - train: hf_bert_ofa_simple
   - datasets: ofa_train_default
 
 train_datasets:
