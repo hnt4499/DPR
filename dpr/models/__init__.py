@@ -138,6 +138,7 @@ def init_hf_bert_ofa_with_passage_scores(args, **kwargs):
 
 
 OFA_INITIALIZERS = {
+    'hf_bert_simple_ofa': init_hf_bert_ofa_simple,  # for backward compatibility
     'hf_bert_ofa_simple': init_hf_bert_ofa_simple,
     'hf_bert_ofa_with_passage_scores': init_hf_bert_ofa_with_passage_scores,
 }
@@ -205,6 +206,7 @@ TENSORIZER_INITIALIZERS = {
     'hf_bert_single_model_match': init_hf_bert_tenzorizer_single_model_match,
     'hf_bert_single_model_match_gated': init_hf_bert_tenzorizer_single_model_match_gated,
     'hf_bert_ofa_simple': init_hf_bert_ofa_simple_tensorizer,
+    'hf_bert_simple_ofa': init_hf_bert_ofa_simple_tensorizer,  # for backward compatibility
     'hf_bert_ofa_with_passage_scores': init_hf_bert_ofa_with_passage_scores_tensorizer,
     'hf_roberta': init_hf_roberta_tenzorizer,
     'pytext_bert': init_hf_bert_tenzorizer,  # using HF's code as of now
@@ -274,6 +276,7 @@ LOSS_INITIALIZERS = {
     'hf_bert_single_model_match': init_hf_bert_loss_single_model_match,
     'hf_bert_single_model_match_gated': init_hf_bert_loss_single_model_match_gated,
     'hf_bert_ofa_simple': init_hf_bert_loss_ofa_simple,
+    'hf_bert_simple_ofa': init_hf_bert_loss_ofa_simple,  # for backward compatibility
     'hf_bert_ofa_with_passage_scores': init_hf_bert_loss_ofa_with_passage_scores,
     'hf_roberta': init_hf_roberta_loss,
     'pytext_bert': init_hf_bert_loss,  # using HF's code as of now
