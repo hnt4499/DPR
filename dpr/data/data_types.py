@@ -323,3 +323,15 @@ ReaderQuestionPredictions = collections.namedtuple(
         "gold_answers",
     ]
 )
+
+ForwardPassOutputsTrain = collections.namedtuple(
+    "ForwardPassOutputs",  # when training, i.e., `inference_only` is False
+    [
+        "loss",
+        "biencoder_is_correct",  # correct count
+        "biencoder_input",
+        "biencoder_preds",  # tensor
+        "reader_input",
+        "reader_preds",  # list of tensors
+    ]
+)

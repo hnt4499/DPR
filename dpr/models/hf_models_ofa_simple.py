@@ -14,6 +14,7 @@ from dpr.data.data_types import (
     ReaderBatch,
     ReaderTrainingConfig,
     ReaderPredictionBatch,
+    ForwardPassOutputsTrain,
 )
 from dpr.models.biencoder import calc_loss as calc_loss_biencoder
 from dpr.models.reader import compute_loss as calc_loss_reader
@@ -31,7 +32,7 @@ def do_ofa_fwd_pass(
     reader_config: ReaderTrainingConfig,
     inference_only: bool = False,
 ) -> Union[
-    Tuple[torch.Tensor, int],
+    ForwardPassOutputsTrain,
     BiEncoderPredictionBatch,
     List[ReaderPredictionBatch],
     Tuple[BiEncoderPredictionBatch, List[ReaderPredictionBatch]],
@@ -72,13 +73,7 @@ def do_ofa_fwd_pass(
                     reader_config=None,
                 )
 
-        if inference_only:
-            del biencoder_input
-            biencoder_preds = BiEncoderPredictionBatch(
-                **move_to_device(biencoder_preds._asdict(), "cpu")
-            )
-
-        else:
+        if not inference_only:
             # Calculate biencoder loss
             biencoder_loss, biencoder_is_correct = calc_loss_biencoder(
                 cfg=trainer.cfg,
@@ -90,7 +85,7 @@ def do_ofa_fwd_pass(
                 loss_scale=None,
             )
             biencoder_is_correct = biencoder_is_correct.sum().item()
-            del biencoder_input  # release memory
+            biencoder_input = BiEncoderBatch(**move_to_device(biencoder_input._asdict(), "cpu"))
 
             # Re-calibrate loss
             if trainer.cfg.n_gpu > 1:
@@ -106,12 +101,18 @@ def do_ofa_fwd_pass(
                     scheduler=trainer.biencoder_scheduler,
                     step=step,
                 )
+        else:
+            biencoder_input = BiEncoderBatch(**move_to_device(biencoder_input._asdict(), "cpu"))
+
+        biencoder_preds = BiEncoderPredictionBatch(
+            **move_to_device(biencoder_preds._asdict(), "cpu")
+        )
 
     # Forward and backward pass for reader
     if mode in ["reader", "both"]:
         reader_total_loss = 0
-        if inference_only:
-            reader_preds_tot: List[ReaderPredictionBatch] = []
+        reader_input_tot: List[ReaderBatch] = []
+        reader_preds_tot: List[ReaderPredictionBatch] = []
 
         for reader_input in reader_inputs:
             reader_input = ReaderBatch(**move_to_device(reader_input._asdict(), trainer.cfg.device))
@@ -153,13 +154,7 @@ def do_ofa_fwd_pass(
                         reader_config=reader_config,
                     )
 
-                if inference_only:
-                    reader_preds = ReaderPredictionBatch(
-                        **move_to_device(reader_preds._asdict(), "cpu")
-                    )
-                    reader_preds_tot.append(reader_preds)
-
-                else:
+                if not inference_only:
                     questions_num, passages_per_question, _ = reader_input.input_ids.size()
                     reader_total_loss = calc_loss_reader(
                         start_positions=reader_input.start_positions,
@@ -173,6 +168,14 @@ def do_ofa_fwd_pass(
                         use_simple_loss=reader_config.use_simple_loss,
                         average=reader_config.average_loss,
                     )
+
+            reader_input = ReaderBatch(**move_to_device(reader_input._asdict(), "cpu"))
+            reader_input_tot.append(reader_input)
+
+            reader_preds = ReaderPredictionBatch(
+                **move_to_device(reader_preds._asdict(), "cpu")
+            )
+            reader_preds_tot.append(reader_preds)
 
     if inference_only:
         if mode == "retriever":
@@ -191,7 +194,15 @@ def do_ofa_fwd_pass(
         else:
             loss = biencoder_loss + reader_total_loss
 
-        return loss, biencoder_is_correct
+        outputs = ForwardPassOutputsTrain(
+            loss=loss,
+            biencoder_is_correct=biencoder_is_correct,
+            biencoder_input=biencoder_input,
+            biencoder_preds=biencoder_preds,
+            reader_input=reader_input_tot,
+            reader_preds=reader_preds_tot,
+        )
+        return outputs
 
 
 def get_bert_one_for_all_components(cfg, inference_only: bool = False, **kwargs):

@@ -40,6 +40,7 @@ from dpr.utils.conf_utils import BiencoderDatasetsCfg
 from dpr.utils.data_utils import (
     ShardedDataIterator,
     ShardedDataIteratorWithCategories,
+    ShardedDataIteratorClustering,
     Tensorizer,
     MultiSetDataIterator,
 )
@@ -53,6 +54,7 @@ from dpr.utils.model_utils import (
     get_model_obj,
     load_states_from_checkpoint,
 )
+from dpr.data.data_types import ForwardPassOutputsTrain, BiEncoderPredictionBatch
 from dpr.data.general_data import GeneralDatasetScheme
 from dpr.data.biencoder_data import Dataset, JsonQADatasetWithAllPassages
 
@@ -111,6 +113,9 @@ class BiEncoderTrainer(object):
         self.cfg = cfg
         self.ds_cfg = BiencoderDatasetsCfg(cfg)
         self.loss_function = init_loss(cfg.encoder.encoder_model_type, cfg)
+        self.clustering = cfg.clustering
+        if self.clustering:
+            cfg.global_loss_buf_sz = 80000000  # this requires a lot of memory
 
         if saved_state:
             self._load_saved_state(saved_state)
@@ -152,21 +157,39 @@ class BiEncoderTrainer(object):
             else:
                 dataset.load_data()
 
-        sharded_iterator_initializers = [ShardedDataIteratorWithCategories if ds.sample_by_cat else ShardedDataIterator
-                                         for ds in datasets_list]
+        if is_train_set and self.clustering:
+            assert not any(ds.sample_by_cat for ds in datasets_list)
+            sharded_iterators = [
+                ShardedDataIteratorClustering(
+                    self.cfg,
+                    ds,
+                    shard_id=self.shard_id,
+                    num_shards=self.distributed_factor,
+                    batch_size=batch_size,
+                    shuffle=shuffle,
+                    shuffle_seed=shuffle_seed,
+                    offset=offset,
+                )
+                for ds in hydra_datasets
+            ]
+        else:
+            sharded_iterator_initializers = [
+                ShardedDataIteratorWithCategories if ds.sample_by_cat else ShardedDataIterator
+                for ds in datasets_list
+            ]
 
-        sharded_iterators = [
-            sharded_iterator_initializer(
-                ds,
-                shard_id=self.shard_id,
-                num_shards=self.distributed_factor,
-                batch_size=batch_size,
-                shuffle=shuffle,
-                shuffle_seed=shuffle_seed,
-                offset=offset,
-            )
-            for ds, sharded_iterator_initializer in zip(hydra_datasets, sharded_iterator_initializers)
-        ]
+            sharded_iterators = [
+                sharded_iterator_initializer(
+                    ds,
+                    shard_id=self.shard_id,
+                    num_shards=self.distributed_factor,
+                    batch_size=batch_size,
+                    shuffle=shuffle,
+                    shuffle_seed=shuffle_seed,
+                    offset=offset,
+                )
+                for ds, sharded_iterator_initializer in zip(hydra_datasets, sharded_iterator_initializers)
+            ]
 
         return MultiSetDataIterator(
             sharded_iterators,
@@ -625,8 +648,27 @@ class BiEncoderTrainer(object):
                 rep_positions_q=rep_positions_q,
                 rep_positions_c=rep_positions_c,
                 loss_scale=loss_scale,
+                clustering=self.clustering,
             )
-            if cfg.others.is_matching:
+            if self.clustering:
+                loss, correct_cnt, (question_vector, context_vector) = outp
+                question_vector = question_vector.clone().detach().cpu().numpy()
+                context_vector = context_vector.clone().detach().cpu().numpy()
+                model_outs = ForwardPassOutputsTrain(
+                    loss=None,
+                    biencoder_is_correct=None,
+                    biencoder_input=biencoder_batch,
+                    biencoder_preds=BiEncoderPredictionBatch(
+                        question_vector=question_vector,
+                        context_vector=context_vector,
+                    ),
+                    reader_input=None,
+                    reader_preds=None,
+                )
+                iterator: ShardedDataIteratorClustering = train_data_iterator.iterables[dataset]
+                iterator.record_predictions(epoch=epoch, model_outs=model_outs)
+
+            elif cfg.others.is_matching:
                 loss, correct_cnt, correct_cnt_matching = outp
                 epoch_correct_predictions_matching += correct_cnt_matching
             else:
@@ -845,6 +887,7 @@ def _do_biencoder_fwd_pass(
     rep_positions_q=0,
     rep_positions_c=0,
     loss_scale: float = None,
+    clustering: bool = False,
 ) -> Tuple[torch.Tensor, int]:
 
     input = BiEncoderBatch(**move_to_device(input._asdict(), cfg.device))
@@ -910,7 +953,10 @@ def _do_biencoder_fwd_pass(
     if cfg.train.gradient_accumulation_steps > 1:
         loss = loss / cfg.gradient_accumulation_steps
 
-    if cfg.others.is_matching:
+    if clustering:
+        assert not cfg.others.is_matching
+        return loss, is_correct, model_out
+    elif cfg.others.is_matching:
         return loss, ml_is_correct, matching_is_correct
     else:
         return loss, is_correct

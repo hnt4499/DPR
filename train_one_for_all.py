@@ -43,12 +43,14 @@ from dpr.data.data_types import (
     ReaderTrainingConfig,
     ReaderPredictionBatch,
     ReaderQuestionPredictions,
+    ForwardPassOutputsTrain,
 )
 from dpr.utils.conf_utils import OneForAllDatasetsCfg
 from dpr.data.general_data import GeneralDatasetScheme
 from dpr.data.biencoder_data import Dataset, DEFAULT_SELECTOR, RepStaticPosTokenSelector
 from dpr.utils.data_utils import (
     ShardedDataIterator,
+    ShardedDataIteratorClustering,
     MultiSetDataIterator,
 )
 from dpr.models.one_for_all_base import create_ofa_input, SimpleOneForAllModel
@@ -62,17 +64,16 @@ from dpr.options import (
     setup_logger,
 )
 from dpr.utils.dist_utils import all_gather_list
+from dpr.utils.dist_utils import gather as _gather_reader
 from dpr.utils.model_utils import (
     CheckpointState,
     setup_for_distributed_mode,
-    move_to_device,
     get_schedule_linear,
     CheckpointStateOFA,
     get_model_file,
     get_model_obj,
 )
 
-from dpr.models.reader import gather as _gather_reader
 from dpr.models.reader import get_best_prediction as _get_best_prediction_reader
 from dpr.data.qa_validation import exact_match_score, f1_score
 
@@ -176,6 +177,9 @@ class OneForAllTrainer(object):
         self.biencoder_scheduler_state = None
         self.reader_optimizer = reader_optimizer
         self.reader_scheduler_state = None
+        self.clustering = cfg.biencoder.clustering
+        if self.clustering:
+            cfg.global_loss_buf_sz = 72000000  # this requires a lot of memory
 
         self.tensorizer = tensorizer
         self.start_epoch = 0
@@ -224,18 +228,33 @@ class OneForAllTrainer(object):
             else:
                 dataset.load_data()
 
-        sharded_iterators = [
-            ShardedDataIterator(
-                ds,
-                shard_id=self.shard_id,
-                num_shards=self.distributed_factor,
-                batch_size=batch_size,
-                shuffle=shuffle,
-                shuffle_seed=shuffle_seed,
-                offset=offset,
-            )
-            for ds in hydra_datasets
-        ]
+        if is_train_set and self.clustering:
+            sharded_iterators = [
+                ShardedDataIteratorClustering(
+                    self.cfg,
+                    ds,
+                    shard_id=self.shard_id,
+                    num_shards=self.distributed_factor,
+                    batch_size=batch_size,
+                    shuffle=shuffle,
+                    shuffle_seed=shuffle_seed,
+                    offset=offset,
+                )
+                for ds in hydra_datasets
+            ]
+        else:
+            sharded_iterators = [
+                ShardedDataIterator(
+                    ds,
+                    shard_id=self.shard_id,
+                    num_shards=self.distributed_factor,
+                    batch_size=batch_size,
+                    shuffle=shuffle,
+                    shuffle_seed=shuffle_seed,
+                    offset=offset,
+                )
+                for ds in hydra_datasets
+            ]
 
         return MultiSetDataIterator(
             sharded_iterators,
@@ -414,16 +433,17 @@ class OneForAllTrainer(object):
                 rep_positions_c=rep_positions_c,
             )
 
-            loss, correct_cnt = self.forward_fn(
-                trainer=self,
-                mode="retriever",
-                backward=False,
-                step=False,
-                biencoder_input=biencoder_batch,
-                biencoder_config=biencoder_training_config,
-                reader_inputs=None,
-                reader_config=None,
-            )
+            with torch.no_grad():
+                loss, correct_cnt = self.forward_fn(
+                    trainer=self,
+                    mode="retriever",
+                    backward=False,
+                    step=False,
+                    biencoder_input=biencoder_batch,
+                    biencoder_config=biencoder_training_config,
+                    reader_inputs=None,
+                    reader_config=None,
+                )
 
             total_loss += loss.item()
             total_correct_predictions += correct_cnt
@@ -904,7 +924,7 @@ class OneForAllTrainer(object):
             )
 
             step = (i + 1) % self.cfg.train.gradient_accumulation_steps == 0  # whether to `step()` now
-            loss, correct_cnt = self.forward_fn(
+            outputs: ForwardPassOutputsTrain = self.forward_fn(
                 trainer=self,
                 mode="both",
                 backward=True,
@@ -914,6 +934,13 @@ class OneForAllTrainer(object):
                 reader_inputs=reader_batch,
                 reader_config=reader_training_config,
             )
+            loss = outputs.loss
+            correct_cnt = outputs.biencoder_is_correct
+
+            # Record predictions if needed
+            if self.clustering:
+                iterator: ShardedDataIteratorClustering = train_data_iterator.iterables[dataset]
+                iterator.record_predictions(epoch=epoch, model_outs=outputs)
 
             epoch_correct_predictions += correct_cnt
             epoch_loss += loss.item()

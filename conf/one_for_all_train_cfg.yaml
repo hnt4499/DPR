@@ -60,6 +60,7 @@ biencoder:
   val_av_rank_other_neg: 30  # number of other negatives during average rank evaluation
   val_av_rank_bsz: 128
   val_av_rank_max_qs: 10000
+  clustering: False  # group samples based on similarity
 
 # Reader config; refer to `extractive_reader_train_cfg.yaml` for descriptions
 reader:

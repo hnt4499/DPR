@@ -23,6 +23,13 @@ import numpy as np
 import torch
 from torch import Tensor as T
 
+from dpr.data.data_types import (
+    BiEncoderBatch,
+    BiEncoderPredictionBatch,
+    ForwardPassOutputsTrain
+)
+from dpr.utils.dist_utils import gather
+
 logger = logging.getLogger()
 
 
@@ -321,6 +328,238 @@ class ShardedDataIteratorWithCategories(ShardedDataIterator):
 
         if not return_all_indices:
             indices = indices[self.shard_start_idx : self.shard_end_idx]
+        return indices
+
+
+class ShardedDataIteratorClustering(ShardedDataIterator):
+    """
+    Use most recent model's predictions to cluster training data together.
+    """
+    def __init__(
+        self,
+        config,
+        data: torch.utils.data.Dataset,
+        shard_id: int = 0,
+        num_shards: int = 1,
+        batch_size: int = 1,
+        shuffle=True,
+        shuffle_seed: int = 0,
+        offset: int = 0,
+        strict_batch_size: bool = False,
+    ):
+        super(ShardedDataIteratorClustering, self).__init__(
+            data=data,
+            shard_id=shard_id,
+            num_shards=num_shards,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            shuffle_seed=shuffle_seed,
+            offset=offset,
+            strict_batch_size=strict_batch_size,
+        )
+        self.config = config
+
+    def iterate_ds_sampled_data(
+        self, num_iterations: int, epoch: int = 0
+    ) -> Iterator[List]:
+        self.iteration = 0
+        shard_indices = self.get_shard_indices(epoch)
+        cycle_it = itertools.cycle(shard_indices)
+        for i in range(num_iterations):
+            items_idxs = [next(cycle_it) for _ in range(self.batch_size)]
+
+            # Record item idxs
+            assert not hasattr(self, "_item_idxs"), "Out of sync"
+            self._item_idxs = items_idxs
+
+            self.iteration += 1
+            items = [self.data[idx] for idx in items_idxs]
+            yield items
+
+        logger.info(
+            "Finished iterating, iteration={}, shard={}".format(
+                self.iteration, self.shard_id
+            )
+        )
+        # TODO: reset the iteration status?
+        self.iteration = 0
+
+    def record_predictions(
+        self,
+        epoch: int,
+        model_outs: ForwardPassOutputsTrain,
+    ):
+        """
+        Record model predictions at each forward pass (i.e., batch-wise).
+        """
+        assert hasattr(self, "_item_idxs"), "Out of sync"
+        assert hasattr(self, "_feature_vectors"), "Out of sync"
+        epoch_rnd = random.Random(self.shuffle_seed + epoch)
+
+        # In each batch, we are guaranteed that number of questions and positive
+        # contexts are equal
+        biencoder_inputs: BiEncoderBatch = model_outs.biencoder_input
+        positive_indices = biencoder_inputs.is_positive
+        hard_neg_indices = biencoder_inputs.hard_negatives
+
+        biencoder_predictions: BiEncoderPredictionBatch = model_outs.biencoder_preds
+        question_vectors = biencoder_predictions.question_vector
+        ctx_vectors = biencoder_predictions.context_vector
+
+        # Note that we cannot compare `len(ctx_vectors)` here since it includes
+        # both positive and negative ctxs
+        assert len(question_vectors) == len(positive_indices) == len(hard_neg_indices) == len(self._item_idxs)
+
+        # Randomly choose one of: 1. positive context; 2: hard negative context; 3: question
+        # to store to save memory (saving them all will be costly)
+        for i, positive_index in enumerate(positive_indices):
+            num_negatives = len(hard_neg_indices[i])
+            # Sometimes we don't have any negative
+            if num_negatives > 0:
+                choice = epoch_rnd.choice([0, 1, 2])
+            else:
+                choice = epoch_rnd.choice([0, 2])
+
+            # Positive context
+            if choice == 0:
+                feature_vector = ctx_vectors[positive_index]
+            # Negative context
+            elif choice == 1:
+                # Further sample one negative context out of possible ones
+                negative_idxs = hard_neg_indices[i]
+                negative_index = epoch_rnd.choice(negative_idxs)
+                feature_vector = ctx_vectors[negative_index]
+            # Question context
+            elif choice == 2:
+                feature_vector = question_vectors[i]
+
+            item_idx = self._item_idxs[i]
+            self._feature_vectors.append((item_idx, feature_vector))
+
+        # Clean up
+        del self._item_idxs
+
+    @torch.no_grad()
+    def get_shard_indices(
+        self,
+        epoch: int,
+    ):
+        indices = list(range(len(self.data)))
+
+        # Only sample when shuffling, i.e., training
+        if self.shuffle:
+            # If at first epoch, sample random as usual
+            if not hasattr(self, "_feature_vectors"):
+                self._feature_vectors = []  # for subsequent calls
+                epoch_rnd = random.Random(self.shuffle_seed + epoch)
+                epoch_rnd.shuffle(indices)
+
+            else:
+                # Sync feature vectors between processes
+                feature_vectors = gather(self.config, [self._feature_vectors])[0]
+                feature_vectors = sum(feature_vectors, [])  # flatten
+                item_idxs, feature_vectors = zip(*feature_vectors)  # unpack
+
+                feature_vectors = [  # don't know why it got converted to numpy...
+                    torch.from_numpy(feature_vector) for feature_vector in feature_vectors
+                ]
+                feature_vectors = torch.stack(feature_vectors, dim=0).to(self.config.device)
+                assert len(item_idxs) == len(feature_vectors), (
+                    f"Out of sync: {len(item_idxs)}, {len(feature_vectors)}"
+                )
+                assert len(item_idxs) == len(set(item_idxs)), "Item indices must be unique"
+                if len(item_idxs) != len(self.data):
+                    logger.warning(
+                        f"Total number of training samples ({len(self.data)}) is different from "
+                        f"number of samples acquired from previous epoch ({len(item_idxs)}). This "
+                        f"is likely due to the fact that the iterator has skipped several samples "
+                        f"during training, especially in DDP mode."
+                    )
+
+                # Compute similarity by batches to avoid out of memory
+                feature_vectors_transposed = feature_vectors.transpose(0, 1)
+                batch_size = self.batch_size * 128  # matrix multiplication does not take too much memory
+                num_batches = math.ceil(len(feature_vectors) / batch_size)
+                similarities = []
+                for batch_i in range(num_batches):
+                    logger.info(f"[{self.__class__.__name__}] Computing similarities: {batch_i + 1}/{num_batches}")
+                    start = batch_i * batch_size
+                    end = min(start + batch_size, len(feature_vectors))
+                    similarities_i = torch.matmul(feature_vectors[start:end], feature_vectors_transposed).cpu()
+                    similarities.append(similarities_i)
+                similarities = torch.cat(similarities, dim=0)
+
+                new_indices = [-1] * len(self.data)  # to store sampled indices
+                not_sampled = np.ones(shape=(len(item_idxs),), dtype="int8")  # whether an i-th sample is not sampled
+                epoch_rnd = random.Random(self.shuffle_seed + epoch)  # to be resumable and sync
+                np_epoch_rnd = np.random.RandomState(seed=self.shuffle_seed + epoch)  # to be resumable and sync
+
+                samples_per_shard = math.ceil(len(self.data) / self.shards_num)
+                batches_per_shard = math.ceil(samples_per_shard / self.batch_size)
+
+                logger.info("Sampling indices so as to maximize cosine similarity between samples within a batch.")
+                start = time.time()
+
+                # Iterate from batch to batch first
+                for batch_i in range(batches_per_shard):
+                    # Iterate from shard to shard later to ensure equality
+                    for shard_i in range(self.shards_num):
+                        batch_start = (shard_i * samples_per_shard + batch_i * self.batch_size)
+                        batch_end = min(batch_start + self.batch_size, (shard_i + 1) * samples_per_shard, len(self.data))
+
+                        # First sample a random sample
+                        not_sampled_idxs = not_sampled.nonzero()[0]  # sample indices that are not sampled
+                        if len(not_sampled_idxs) == 0:
+                            break  # skip immediately when we are near the end of the shard
+                        first_sample = np_epoch_rnd.choice(not_sampled_idxs)
+
+                        new_indices[batch_start] = int(first_sample)  # note that this is a relative index
+                        not_sampled[first_sample] = 0
+
+                        # Sample top-k samples with highest similarity to that of the first the sample in the batch
+                        first_sample_similarities = similarities[first_sample]
+                        sorted_idxs = torch.argsort(first_sample_similarities, dim=0, descending=True)
+                        idx = batch_start + 1  # to-be-sampled index
+
+                        for sorted_idx in sorted_idxs.cpu().tolist():
+                            if sorted_idx in not_sampled_idxs and sorted_idx != first_sample:
+                                new_indices[idx] = sorted_idx
+                                not_sampled[sorted_idx] = 0
+
+                                # Update
+                                idx += 1
+                                if idx == batch_end:
+                                    break
+
+                # Indices that are skipped during previous epoch
+                skipped_idxs = list(
+                    set(range(len(self.data))) - set(item_idxs)
+                )
+                # Shuffle skipped indices
+                epoch_rnd.shuffle(skipped_idxs)
+                # Convert every relative indices to real indices
+                indices = []
+                i = 0  # counter for skipped indices
+                for new_index in new_indices:
+                    if new_index == -1:
+                        indices.append(skipped_idxs[i])
+                        i += 1
+                    else:
+                        indices.append(item_idxs[new_index])
+
+                time_elapsed = time.time() - start
+                logger.info(f"Sampling took {time_elapsed:.2f}s")
+
+                # Clean up
+                self._feature_vectors = []
+
+        # Sanity check
+        assert sorted(indices) == list(range(len(self.data)))
+        # Ensure that other processes got the same results
+        all_indices = gather(self.config, [indices])[0]
+        assert all(indices_i == all_indices[0] for indices_i in all_indices)  # compare with the first list
+
+        indices = indices[self.shard_start_idx : self.shard_end_idx]
         return indices
 
 

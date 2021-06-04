@@ -50,3 +50,5 @@ ignore_checkpoint_optimizer: False
 
 # set to >1 to enable multiple query encoders
 multi_q_encoder: False
+
+clustering: False

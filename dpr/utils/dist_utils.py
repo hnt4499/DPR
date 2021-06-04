@@ -10,6 +10,7 @@ Utilities for distributed model training
 """
 
 import pickle
+from typing import List, Tuple
 
 import torch
 import torch.distributed as dist
@@ -94,3 +95,28 @@ def all_gather_list(data, group=None, max_size=16384):
             'in your training script that can cause one worker to finish an epoch '
             'while other workers are still iterating over their portions of the data.'
         )
+
+
+def gather(cfg, objects_to_sync: List[object]) -> List[Tuple]:
+    """Helper function to gather all needed data."""
+    distributed_world_size = cfg.distributed_world_size or 1
+
+    if distributed_world_size > 1:
+        global_objects_to_sync = all_gather_list(
+            objects_to_sync,
+            max_size=cfg.global_loss_buf_sz,
+        )
+
+        gathered_objects = []
+
+        for i, item in enumerate(global_objects_to_sync):
+            if i != cfg.local_rank:
+                gathered_objects.append(item)
+            else:
+                gathered_objects.append(objects_to_sync)
+
+    else:
+        gathered_objects = [objects_to_sync]
+
+    gathered_objects = list(zip(*gathered_objects))
+    return gathered_objects

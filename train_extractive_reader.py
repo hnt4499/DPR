@@ -25,7 +25,7 @@ from collections import defaultdict
 from omegaconf import DictConfig, OmegaConf
 from typing import List
 
-from dpr.models.reader import gather, get_best_prediction
+from dpr.models.reader import get_best_prediction
 from dpr.data.qa_validation import exact_match_score, f1_score
 from dpr.data.data_types import ReaderBatch, ReaderQuestionPredictions
 from dpr.data.general_data import TokenizedWikipediaPassages
@@ -54,6 +54,7 @@ from dpr.utils.model_utils import (
     setup_for_distributed_mode,
     get_model_obj,
 )
+from dpr.utils.dist_utils import gather
 
 logger = logging.getLogger()
 setup_logger(logger)
