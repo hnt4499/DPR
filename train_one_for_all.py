@@ -434,7 +434,7 @@ class OneForAllTrainer(object):
             )
 
             with torch.no_grad():
-                loss, correct_cnt = self.forward_fn(
+                outputs: ForwardPassOutputsTrain = self.forward_fn(
                     trainer=self,
                     mode="retriever",
                     backward=False,
@@ -444,6 +444,8 @@ class OneForAllTrainer(object):
                     reader_inputs=None,
                     reader_config=None,
                 )
+            loss = outputs.loss
+            correct_cnt = outputs.biencoder_is_correct
 
             total_loss += loss.item()
             total_correct_predictions += correct_cnt

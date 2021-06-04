@@ -48,7 +48,11 @@ def do_ofa_fwd_pass(
     assert mode in ["retriever", "reader", "both"], f"Invalid mode: {mode}"
     if inference_only:
         assert (not backward) and (not step) and (not trainer.model.training)
-    biencoder_is_correct = 0
+    biencoder_is_correct = None
+    biencoder_input = None
+    biencoder_preds = None
+    reader_input_tot = None
+    reader_preds_tot = None
 
     # Forward pass and backward pass for biencoder
     if mode in ["retriever", "both"]:

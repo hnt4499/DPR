@@ -15,6 +15,7 @@ from dpr.data.data_types import (
     ReaderBatch,
     ReaderTrainingConfig,
     ReaderPredictionBatch,
+    ForwardPassOutputsTrain,
 )
 from dpr.models.biencoder import calc_loss as calc_loss_biencoder
 from dpr.models.reader import compute_loss as calc_loss_reader
@@ -32,7 +33,7 @@ def do_ofa_fwd_pass(
     reader_config: ReaderTrainingConfig,
     inference_only: bool = False,
 ) -> Union[
-    Tuple[torch.Tensor, int],
+    ForwardPassOutputsTrain,
     BiEncoderPredictionBatch,
     List[ReaderPredictionBatch],
     Tuple[BiEncoderPredictionBatch, List[ReaderPredictionBatch]]
@@ -50,7 +51,11 @@ def do_ofa_fwd_pass(
     assert mode in ["retriever", "reader", "both"], f"Invalid mode: {mode}"
     if inference_only:
         assert (not backward) and (not step) and (not trainer.model.training)
-    biencoder_is_correct = 0
+    biencoder_is_correct = None
+    biencoder_input = None
+    biencoder_preds = None
+    reader_input_tot = None
+    reader_preds_tot = None
 
     # Forward pass and backward pass for biencoder
     if mode in ["retriever", "both"]:
@@ -75,13 +80,7 @@ def do_ofa_fwd_pass(
                     reader_config=None,
                 )
 
-        if inference_only:
-            del biencoder_input
-            biencoder_preds = BiEncoderPredictionBatch(
-                **move_to_device(biencoder_preds._asdict(), "cpu")
-            )
-
-        else:
+        if not inference_only:
             # Calculate biencoder loss
             biencoder_loss, biencoder_is_correct = calc_loss_biencoder(
                 cfg=trainer.cfg,
@@ -93,7 +92,7 @@ def do_ofa_fwd_pass(
                 loss_scale=None,
             )
             biencoder_is_correct = biencoder_is_correct.sum().item()
-            del biencoder_input  # release memory
+            biencoder_input = BiEncoderBatch(**move_to_device(biencoder_input._asdict(), "cpu"))
 
             # Re-calibrate loss
             if trainer.cfg.n_gpu > 1:
@@ -110,42 +109,49 @@ def do_ofa_fwd_pass(
                     step=step,
                 )
 
+            else:
+                biencoder_input = BiEncoderBatch(**move_to_device(biencoder_input._asdict(), "cpu"))
+
+            biencoder_preds = BiEncoderPredictionBatch(
+                **move_to_device(biencoder_preds._asdict(), "cpu")
+            )
+
     # Forward and backward pass for reader
     if mode in ["reader", "both"]:
         reader_total_loss = 0
-        if inference_only:
-            reader_preds_tot: List[ReaderPredictionBatch] = []
+        reader_input_tot: List[ReaderBatch] = []
+        reader_preds_tot: List[ReaderPredictionBatch] = []
 
         for reader_input in reader_inputs:
 
             # First we need to forward all passages to the biencoder to get passage scores
-            biencoder_input = create_biencoder_input_from_reader_input(
+            biencoder_input_i = create_biencoder_input_from_reader_input(
                 tensorizer=trainer.tensorizer,
                 reader_batch=reader_input,
             )
-            biencoder_input = BiEncoderBatch(**move_to_device(biencoder_input._asdict(), trainer.cfg.device))
+            biencoder_input_i = BiEncoderBatch(**move_to_device(biencoder_input_i._asdict(), trainer.cfg.device))
             # Forward
             if trainer.model.training:
-                biencoder_preds: BiEncoderPredictionBatch = trainer.model(
+                biencoder_preds_i: BiEncoderPredictionBatch = trainer.model(
                     mode="retriever",
-                    biencoder_batch=biencoder_input,
+                    biencoder_batch=biencoder_input_i,
                     biencoder_config=biencoder_config,
                     reader_batch=None,
                     reader_config=None,
                 )
             else:
                 with torch.no_grad():
-                    biencoder_preds: BiEncoderPredictionBatch = trainer.model(
+                    biencoder_preds_i: BiEncoderPredictionBatch = trainer.model(
                     mode="retriever",
-                    biencoder_batch=biencoder_input,
+                    biencoder_batch=biencoder_input_i,
                     biencoder_config=biencoder_config,
                     reader_batch=None,
                     reader_config=None,
                 )
 
             # Get passage scores
-            question_vectors: T = biencoder_preds.question_vector  # (N, H)
-            context_vectors: T = biencoder_preds.context_vector  # (N * M, H)
+            question_vectors: T = biencoder_preds_i.question_vector  # (N, H)
+            context_vectors: T = biencoder_preds_i.context_vector  # (N * M, H)
             N, H = question_vectors.size()
 
             question_vectors = question_vectors.view(N, 1, H)  # (N, 1, H)
@@ -161,7 +167,7 @@ def do_ofa_fwd_pass(
             reader_input._replace(passage_scores=passage_scores)
 
             # Release memory
-            del biencoder_input, biencoder_preds, question_vectors, context_vectors, passage_scores
+            del biencoder_input_i, biencoder_preds_i, question_vectors, context_vectors, passage_scores
 
             if trainer.model.training:
                 reader_preds: ReaderPredictionBatch = trainer.model(
@@ -200,13 +206,7 @@ def do_ofa_fwd_pass(
                         reader_config=reader_config,
                     )
 
-                if inference_only:
-                    reader_preds = ReaderPredictionBatch(
-                        **move_to_device(reader_preds._asdict(), "cpu")
-                    )
-                    reader_preds_tot.append(reader_preds)
-
-                else:
+                if not inference_only:
                     questions_num, passages_per_question, _ = reader_input.input_ids.size()
                     reader_total_loss = calc_loss_reader(
                         start_positions=reader_input.start_positions,
@@ -221,7 +221,13 @@ def do_ofa_fwd_pass(
                         average=reader_config.average_loss,
                     )
 
-            del reader_preds  # release memory
+            reader_input = ReaderBatch(**move_to_device(reader_input._asdict(), "cpu"))
+            reader_input_tot.append(reader_input)
+
+            reader_preds = ReaderPredictionBatch(
+                **move_to_device(reader_preds._asdict(), "cpu")
+            )
+            reader_preds_tot.append(reader_preds)
 
     if inference_only:
         if mode == "retriever":
@@ -240,7 +246,15 @@ def do_ofa_fwd_pass(
         else:
             loss = biencoder_loss + reader_total_loss
 
-        return loss, biencoder_is_correct
+        outputs = ForwardPassOutputsTrain(
+            loss=loss,
+            biencoder_is_correct=biencoder_is_correct,
+            biencoder_input=biencoder_input,
+            biencoder_preds=biencoder_preds,
+            reader_input=reader_input_tot,
+            reader_preds=reader_preds_tot,
+        )
+        return outputs
 
 
 def get_bert_one_for_all_components(cfg, inference_only: bool = False, **kwargs):
