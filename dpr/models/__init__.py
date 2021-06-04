@@ -136,11 +136,18 @@ def init_hf_bert_ofa_with_passage_scores(args, **kwargs):
     from .hf_models_ofa_with_passage_scores import get_bert_one_for_all_components
     return get_bert_one_for_all_components(args, **kwargs)
 
+def init_hf_bert_ofa_special_tokens(args, **kwargs):
+    if importlib.util.find_spec("transformers") is None:
+        raise RuntimeError('Please install transformers lib')
+    from .hf_models_ofa_special_tokens import get_bert_one_for_all_components
+    return get_bert_one_for_all_components(args, **kwargs)
+
 
 OFA_INITIALIZERS = {
     'hf_bert_simple_ofa': init_hf_bert_ofa_simple,  # for backward compatibility
     'hf_bert_ofa_simple': init_hf_bert_ofa_simple,
     'hf_bert_ofa_with_passage_scores': init_hf_bert_ofa_with_passage_scores,
+    'hf_bert_ofa_special_tokens': init_hf_bert_ofa_special_tokens,
 }
 
 
@@ -193,6 +200,13 @@ def init_hf_bert_ofa_with_passage_scores_tensorizer(args, **kwargs):
     return get_bert_tensorizer(args)
 
 
+def init_hf_bert_ofa_special_tokens_tensorizer(args, **kwargs):
+    if importlib.util.find_spec("transformers") is None:
+        raise RuntimeError('Please install transformers lib')
+    from .hf_models_ofa_special_tokens import get_bert_tensorizer
+    return get_bert_tensorizer(args)
+
+
 def init_hf_roberta_tenzorizer(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
@@ -208,6 +222,8 @@ TENSORIZER_INITIALIZERS = {
     'hf_bert_ofa_simple': init_hf_bert_ofa_simple_tensorizer,
     'hf_bert_simple_ofa': init_hf_bert_ofa_simple_tensorizer,  # for backward compatibility
     'hf_bert_ofa_with_passage_scores': init_hf_bert_ofa_with_passage_scores_tensorizer,
+    'hf_bert_ofa_special_tokens': init_hf_bert_ofa_special_tokens_tensorizer,
+
     'hf_roberta': init_hf_roberta_tenzorizer,
     'pytext_bert': init_hf_bert_tenzorizer,  # using HF's code as of now
     'fairseq_roberta': init_hf_roberta_tenzorizer,  # using HF's code as of now
@@ -263,6 +279,13 @@ def init_hf_bert_loss_ofa_with_passage_scores(args, **kwargs):
     return BiEncoderNllLoss(args)
 
 
+def init_hf_bert_loss_ofa_special_tokens(args, **kwargs):
+    if importlib.util.find_spec("transformers") is None:
+        raise RuntimeError('Please install transformers lib')
+    from .biencoder import BiEncoderNllLoss
+    return BiEncoderNllLoss(args)
+
+
 def init_hf_roberta_loss(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
@@ -278,6 +301,8 @@ LOSS_INITIALIZERS = {
     'hf_bert_ofa_simple': init_hf_bert_loss_ofa_simple,
     'hf_bert_simple_ofa': init_hf_bert_loss_ofa_simple,  # for backward compatibility
     'hf_bert_ofa_with_passage_scores': init_hf_bert_loss_ofa_with_passage_scores,
+    'hf_bert_ofa_special_tokens': init_hf_bert_loss_ofa_special_tokens,
+
     'hf_roberta': init_hf_roberta_loss,
     'pytext_bert': init_hf_bert_loss,  # using HF's code as of now
     'fairseq_roberta': init_hf_roberta_loss,  # using HF's code as of now
