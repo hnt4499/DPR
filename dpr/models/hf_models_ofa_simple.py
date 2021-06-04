@@ -49,7 +49,6 @@ def do_ofa_fwd_pass(
     if inference_only:
         assert (not backward) and (not step) and (not trainer.model.training)
     biencoder_is_correct = None
-    biencoder_input = None
     biencoder_preds = None
     reader_input_tot = None
     reader_preds_tot = None
