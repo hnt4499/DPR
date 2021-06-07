@@ -224,7 +224,7 @@ class OneForAllTrainer(object):
 
         for dataset in datasets_list:
             if isinstance(dataset, GeneralDatasetScheme):
-                dataset.load_data(wiki_data=self.ds_cfg.wiki_data)
+                dataset.load_data(wiki_data=self.ds_cfg.wiki_data, tensorizer=self.tensorizer)
             else:
                 dataset.load_data()
 

@@ -24,9 +24,10 @@ from dpr.data.data_types import (
     BiEncoderSampleTokenized,
     # Else
     DataPassage,
+    DataSample,
     ReaderSample,
 )
-from dpr.data.general_data import TokenizedWikipediaPassages, GeneralDataset, GeneralDatasetScheme
+from dpr.data.general_data import TokenizedWikipediaPassages, GeneralDataset, GeneralDatasetScheme, _find_answer_positions
 
 logger = logging.getLogger(__name__)
 
@@ -511,7 +512,7 @@ class OneForAllDataset(Dataset, GeneralDatasetScheme):
             load_data=True,
         )
 
-    def load_data(self, wiki_data: TokenizedWikipediaPassages):
+    def load_data(self, wiki_data: TokenizedWikipediaPassages, tensorizer: Tensorizer):
         self.wiki_data = wiki_data
         self.wiki_data.load_data()
         self.dataset.load_data()
@@ -573,7 +574,179 @@ class OneForAllDataset(Dataset, GeneralDatasetScheme):
 
 class BiEncoderGeneralDataset(OneForAllDataset):
     def __init__(self, **kwargs):
-        super(BiEncoderGeneralDataset, self).__init__(mode="retriever" ,**kwargs)
+        super(BiEncoderGeneralDataset, self).__init__(mode="retriever", **kwargs)
+
+
+class BiEncoderGeneralDatasetWithDataAugmentation(BiEncoderGeneralDataset):
+    def __init__(
+        self,
+        ctx_aug_boundary: int = 15,  # maximum number of tokens to augment for each side
+        ctx_aug_prob: float = 0.3,  # augmentation probability
+        **kwargs,
+    ):
+        super(BiEncoderGeneralDatasetWithDataAugmentation, self).__init__(**kwargs)
+        self.ctx_aug_boundary = ctx_aug_boundary
+        self.ctx_aug_prob = ctx_aug_prob
+
+    def load_data(self, wiki_data: TokenizedWikipediaPassages, tensorizer: Tensorizer):
+        super(BiEncoderGeneralDatasetWithDataAugmentation, self).load_data(
+            wiki_data, tensorizer)
+        self.tensorizer = tensorizer
+
+    def _boundary_aug(self, ctx: DataPassage, answers_ids: List[np.ndarray]) -> DataPassage:
+        if self.ctx_aug_boundary <= 0:
+            return ctx
+        ctx_id = int(ctx.id)
+        ctx_passage = ctx.passage_token_ids
+        ctx_title = ctx.title_token_ids
+
+        lengths_to_augment = [0]  # 0 means no augmentation
+        # Previous passage
+        try:
+            prev_ctx = self.wiki_data.get_tokenized_data(ctx_id - 1)
+            prev_passage = prev_ctx["passage_token_ids"]
+            prev_title = prev_ctx["title_token_ids"]
+
+            if len(ctx_title) == len(prev_title) and (ctx_title == prev_title).all():
+                lengths_to_augment.extend(range(-self.ctx_aug_boundary, 0))
+        except (IndexError, KeyError):  # there is no such index in the database
+            pass
+
+        # Next passage
+        try:
+            next_ctx = self.wiki_data.get_tokenized_data(ctx_id + 1)
+            next_passage = next_ctx["passage_token_ids"]
+            next_title = next_ctx["title_token_ids"]
+
+            if len(ctx_title) == len(next_title) and (ctx_title == next_title).all():
+                lengths_to_augment.extend(range(1, self.ctx_aug_boundary + 1))
+        except (IndexError, KeyError):  # there is no such index in the database
+            pass
+
+        length_to_augment = random.choice(lengths_to_augment)
+        original_length = len(ctx_passage)
+
+        # Do augmentation: only do augmentation when both the previous and next passages
+        # are from the same article as the current passage
+        if len(lengths_to_augment) != (2 * self.ctx_aug_boundary + 1) or length_to_augment == 0:
+            aug_ids = None
+        elif length_to_augment < 0:  # augment with previous passage
+            aug_ids = np.concatenate([
+                prev_passage[length_to_augment:],
+                ctx_passage[:length_to_augment]
+            ])
+            assert len(aug_ids) == original_length
+        elif length_to_augment > 0:  # augment with next passage
+            aug_ids = np.concatenate([
+                ctx_passage[length_to_augment:],
+                next_passage[:length_to_augment],
+            ])
+            assert len(aug_ids) == original_length
+
+        if aug_ids is not None:
+            # Re-parse answers
+            answers_spans = [
+                _find_answer_positions(aug_ids, answer_ids)
+                for answer_ids in answers_ids
+            ]
+            answers_spans = sum(answers_spans, [])  # flatten
+            answers_spans = list(filter(None, answers_spans))  # remove invalid entries
+
+            # Create new passage object and update augmented data
+            new_ctx = DataPassage(id=ctx.id)
+            new_ctx.is_gold = ctx.is_gold
+            new_ctx.title_token_ids = ctx_title.copy()
+            new_ctx.passage_token_ids = aug_ids.copy()
+            new_ctx.answers_spans = answers_spans
+
+            ctx = new_ctx
+
+        return ctx
+
+    def __getitem__(self, index) -> BiEncoderSampleTokenized:
+        self.tensorizer.set_pad_to_max(False)
+
+        sample: DataSample = self.dataset[index]
+        answers = sample.answers
+        answers_ids = [
+            self.tensorizer.tokenizer.encode(
+                answer,
+                add_special_tokens=False,
+                max_length=10000,
+                pad_to_max_length=False,
+                truncation=True,
+            )
+            for answer in answers
+        ]
+        answers_ids = [np.array(answer_ids) for answer_ids in answers_ids]
+
+        retriever_sample = BiEncoderSampleTokenized()
+        retriever_sample.query_ids = sample.question_token_ids
+
+        positive_ctxs = sample.gold_passages + sample.positive_passages
+
+        # TODO: allow other kinds of positives and negatives, such as distantly positives
+        hard_negative_ctxs = sample.negative_passages
+        bm25_negative_ctxs = sample.bm25_negative_passages
+
+        # Load tokens
+        for ctx in positive_ctxs + hard_negative_ctxs + bm25_negative_ctxs:
+            tokens = self.wiki_data.get_tokenized_data(int(ctx.id))
+            ctx.load_tokens(**tokens)
+
+        # Context boundary augmentation
+        if self.ctx_aug_boundary > 0 and random.random() < self.ctx_aug_prob:
+            # Positives
+            new_positive_ctxs = []
+
+            for ctx in positive_ctxs:
+                # Do augmentation
+                aug_ctx = self._boundary_aug(ctx, answers_ids)
+                # Check if it results in another positive context
+                if aug_ctx.answers_spans is not None and len(aug_ctx.answers_spans) > 0:
+                    new_positive_ctxs.append(aug_ctx)
+                else:
+                    new_positive_ctxs.append(ctx)
+            positive_ctxs = new_positive_ctxs
+
+            # Hard negatives
+            new_hard_negative_ctxs = []
+            for ctx in hard_negative_ctxs:
+                # Do augmentation
+                aug_ctx = self._boundary_aug(ctx, answers_ids)
+                # Check if it results in another positive context
+                if aug_ctx.answers_spans is not None and len(aug_ctx.answers_spans) > 0:
+                    new_hard_negative_ctxs.append(ctx)
+                else:
+                    new_hard_negative_ctxs.append(aug_ctx)
+            hard_negative_ctxs = new_hard_negative_ctxs
+
+            # BM25 hard negatives
+            new_bm25_negative_ctxs = []
+            for ctx in bm25_negative_ctxs:
+                # Do augmentation
+                aug_ctx = self._boundary_aug(ctx, answers_ids)
+                # Check if it results in another positive context
+                if aug_ctx.answers_spans is not None and len(aug_ctx.answers_spans) > 0:
+                    new_bm25_negative_ctxs.append(ctx)
+                else:
+                    new_bm25_negative_ctxs.append(aug_ctx)
+            bm25_negative_ctxs = new_bm25_negative_ctxs
+
+        def create_passage(ctx: DataPassage):
+            return BiEncoderPassageTokenized(
+                id=ctx.id,
+                is_gold=ctx.is_gold,
+                text_ids=ctx.passage_token_ids,
+                title_ids=ctx.title_token_ids,
+            )
+
+        retriever_sample.positive_passages = [create_passage(ctx) for ctx in positive_ctxs]
+        retriever_sample.hard_negative_passages = [create_passage(ctx) for ctx in hard_negative_ctxs]
+        retriever_sample.bm25_negative_passages = [create_passage(ctx) for ctx in bm25_negative_ctxs]
+
+        self.tensorizer.set_pad_to_max(True)
+        return retriever_sample
 
 
 def normalize_passage(ctx_text: str):

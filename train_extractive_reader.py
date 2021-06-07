@@ -151,7 +151,7 @@ class ReaderTrainer(object):
             debugging=self.debugging,
         )
 
-        dataset.load_data()
+        dataset.load_data(wiki_data=self.wiki_data, tensorizer=self.tensorizer)
 
         iterator = ShardedDataIterator(
             dataset,

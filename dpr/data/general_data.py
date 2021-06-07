@@ -211,7 +211,7 @@ class GeneralDataset(torch.utils.data.Dataset):
 
 class GeneralDatasetScheme(object):
     """General dataset marker."""
-    def load_data(self, wiki_data: TokenizedWikipediaPassages):
+    def load_data(self, wiki_data: TokenizedWikipediaPassages, tensorizer: Tensorizer):
         raise NotImplementedError
 
 
