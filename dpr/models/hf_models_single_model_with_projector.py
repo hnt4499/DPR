@@ -27,6 +27,7 @@ class BERTWithProjector(nn.Module):
     def __init__(self, base_encoder: BertModel, project_dims: Union[int, List[int]]):
         super(BERTWithProjector, self).__init__()
         self.base_encoder = base_encoder
+        self.config = self.base_encoder.config
 
         # Projector head
         if isinstance(project_dims, int):

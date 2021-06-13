@@ -9,7 +9,6 @@
 BiEncoder component + loss function for 'all-in-batch' training
 """
 
-import collections
 import logging
 import random
 from typing import Tuple, List
@@ -76,7 +75,7 @@ class BiEncoder(nn.Module):
         attn_mask: T,
         fix_encoder: bool = False,
         representation_token_pos=0,
-    ) -> (T, T, T):
+    ) -> Tuple[T, T, T]:
         sequence_output = None
         pooled_output = None
         hidden_states = None
@@ -114,6 +113,8 @@ class BiEncoder(nn.Module):
         encoder_type: str = None,
         representation_token_pos_q=0,
         representation_token_pos_c=0,
+        positive_idxs: T = None,
+        hard_negative_idxs: T = None,
     ) -> Tuple[T, T]:
         q_encoder = (
             self.question_model
@@ -647,6 +648,131 @@ class MatchGated_BiEncoder(BiEncoder):
 
 class MatchGated_BiEncoderNllLoss(Match_BiEncoderNllLoss):
     pass
+
+
+class BiEncoderBarlowTwins(BiEncoder):
+    """
+    Biencoder with Barlow Twins loss function.
+
+    Reference:
+        Zbontar, J., Jing, L., Misra, I., LeCun, Y., & Deny, S. (2021). Barlow Twins:
+        Self-Supervised Learning via Redundancy Reduction.
+
+    Adapted from:
+        https://github.com/facebookresearch/barlowtwins/blob/e6f34a01c0cde6f05da6f431ef8a577b42e94e71/main.py#L207
+    """
+
+    def __init__(
+        self,
+        *args,
+        **kwargs,
+    ):
+        super(BiEncoderBarlowTwins, self).__init__(*args, **kwargs)
+        self.batchnorm_q = nn.BatchNorm1d(
+            num_features=self.question_model.config.hidden_size,
+            affine=False,
+        )
+        self.batchnorm_c = nn.BatchNorm1d(
+            num_features=self.ctx_model.config.hidden_size,
+            affine=False,
+        )
+
+    def forward(
+        self,
+        question_ids: T,
+        question_segments: T,
+        question_attn_mask: T,
+        context_ids: T,
+        ctx_segments: T,
+        ctx_attn_mask: T,
+        encoder_type: str = None,
+        representation_token_pos_q=0,
+        representation_token_pos_c=0,
+        positive_idxs: T = None,
+        hard_negative_idxs: T = None,
+    ) -> Tuple[T, T]:
+        """
+        If `positive_idxs` and `hard_negative_idxs` are specified, meaning "training", we exclude
+        negative passages from the input (since we don't need it).
+        """
+        if positive_idxs is not None and hard_negative_idxs is not None:
+            assert len(positive_idxs) == len(question_ids)
+            context_ids = context_ids[positive_idxs]
+            ctx_segments = ctx_segments[positive_idxs]
+            ctx_attn_mask = ctx_attn_mask[positive_idxs]
+
+        q_pooled_out, ctx_pooled_out = super(BiEncoderBarlowTwins, self).forward(
+            question_ids, question_segments, question_attn_mask,
+            context_ids, ctx_segments, ctx_attn_mask,
+            encoder_type=encoder_type,
+            representation_token_pos_q=representation_token_pos_q,
+            representation_token_pos_c=representation_token_pos_c,
+        )
+
+        # Apply batch normalization
+        if q_pooled_out is not None:
+            q_pooled_out = self.batchnorm_q(q_pooled_out)
+        if ctx_pooled_out is not None:
+            ctx_pooled_out = self.batchnorm_c(ctx_pooled_out)
+
+        return q_pooled_out, ctx_pooled_out
+
+
+def off_diagonal(x):
+    # return a flattened view of the off-diagonal elements of a square matrix
+    n, m = x.shape
+    assert n == m
+    return x.flatten()[:-1].view(n - 1, n + 1)[:, 1:].flatten()
+
+
+class BiEncoderBarlowTwinsLoss(BiEncoderNllLoss):
+    def calc(
+        self,
+        q_vectors: T,
+        ctx_vectors: T,
+        positive_idx_per_question: list,
+        hard_negative_idx_per_question: list = None,
+        loss_scale: float = None,
+    ) -> Tuple[T, int]:
+        """
+        Biencoder with Barlow Twins loss function.
+
+        Reference:
+            Zbontar, J., Jing, L., Misra, I., LeCun, Y., & Deny, S. (2021). Barlow Twins:
+            Self-Supervised Learning via Redundancy Reduction.
+
+        Adapted from:
+            https://github.com/facebookresearch/barlowtwins/blob/e6f34a01c0cde6f05da6f431ef8a577b42e94e71/main.py#L207
+
+        If `q_vectors` and `ctx_vectors` have the same length, compute Barlow Twins loss
+            function using a cross-correlation matrix.
+        Otherwise, compute the loss as usual.
+        """
+        # Training: we don't need to compute negative passages' representations
+        if len(q_vectors) == len(ctx_vectors):
+            # Empirical cross-correlation matrix
+            c = q_vectors.T @ ctx_vectors  # (H, H), where H is hidden size
+
+            # Sum the cross-correlation matrix between all gpus
+            batch_size = len(q_vectors) * self.cfg.distributed_world_size
+            c.div_(batch_size)
+            torch.distributed.all_reduce(c)
+
+            on_diag = torch.diagonal(c).add_(-1).pow_(2).sum()
+            off_diag = off_diagonal(c).pow_(2).sum()
+
+            # TODO: allow configuring lambda
+            loss = on_diag + 5e-3 * off_diag
+            return loss, torch.tensor([-1])
+
+        else:
+            scores = self.get_scores(q_vectors, ctx_vectors)
+
+            if len(q_vectors.size()) > 1:
+                q_num = q_vectors.size(0)
+                scores = scores.view(q_num, -1)
+
+            return self.calc_given_score_matrix(scores, positive_idx_per_question, loss_scale=loss_scale)
 
 
 def _select_span_with_token(

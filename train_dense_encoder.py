@@ -906,6 +906,9 @@ def _do_biencoder_fwd_pass(
             encoder_type=encoder_type,
             representation_token_pos_q=rep_positions_q,
             representation_token_pos_c=rep_positions_c,
+            # Only pass these during training
+            positive_idxs=input.is_positive,
+            hard_negative_idxs=input.hard_negatives,
         )
     else:
         with torch.no_grad():
