@@ -383,7 +383,7 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
         if length_to_augment < 0:  # augment with previous passage
             # Shrink until we find a token that is not a subword
             left_aug_idx = len(prev_passage_ids) + length_to_augment
-            while True:
+            while 0 < left_aug_idx < len(prev_passage_ids) - 1:
                 token_str: str = id_to_token(prev_passage_ids[left_aug_idx])
                 if token_str.startswith("##") or token_str.startswith(" ##"):
                     left_aug_idx += 1
@@ -391,7 +391,7 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
                     break
 
             right_aug_idx = len(text_ids) + length_to_augment
-            while True:
+            while 0 < right_aug_idx < len(text_ids) - 1:
                 token_str: str = id_to_token(text_ids[right_aug_idx + 1])
                 if token_str.startswith("##") or token_str.startswith(" ##"):
                     right_aug_idx -= 1
@@ -406,7 +406,7 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
         elif length_to_augment > 0:  # augment with next passage
             # Shrink until we find a token that is not a subword
             left_aug_idx = length_to_augment
-            while True:
+            while 0 < left_aug_idx < len(text_ids) - 1:
                 token_str: str = id_to_token(text_ids[left_aug_idx])
                 if token_str.startswith("##") or token_str.startswith(" ##"):
                     left_aug_idx += 1
@@ -414,7 +414,7 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
                     break
 
             right_aug_idx = length_to_augment
-            while True:
+            while 0 < right_aug_idx < len(next_passage_ids) - 1:
                 token_str: str = id_to_token(next_passage_ids[right_aug_idx + 1])
                 if token_str.startswith("##") or token_str.startswith(" ##"):
                     right_aug_idx -= 1
