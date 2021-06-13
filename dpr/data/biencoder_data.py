@@ -354,7 +354,7 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
         data = self.all_passages.loc[index]
         text, title = data[["text", "title"]]
 
-        if self.ctx_boundary_aug <= 0:
+        if self.ctx_boundary_aug <= 0 or random.random() < self.ctx_aug_prob:
             if title in ["nan", "NaN"] or title is np.nan:
                 title = None
             return text, text, title, None
@@ -459,53 +459,52 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
         )
 
         # Context boundary augmentation
-        if self.ctx_boundary_aug > 0 and random.random() < self.ctx_aug_prob:
-            # Positives
-            new_positive_ctxs = []
-            for ctx in positive_ctxs:
-                passage_id = int(ctx["id"])
-                ctx, aug_ctx, title, answers_spans = self._boundary_aug(
-                    passage_id, answers)  # do boundary augmentation
-                orig_ctx = {"text": ctx, "title": title}
-                aug_ctx = {"text": aug_ctx, "title": title}
+        # Positives
+        new_positive_ctxs = []
+        for ctx in positive_ctxs:
+            passage_id = int(ctx["id"])
+            ctx, aug_ctx, title, answers_spans = self._boundary_aug(
+                passage_id, answers)  # do boundary augmentation
+            orig_ctx = {"text": ctx, "title": title}
+            aug_ctx = {"text": aug_ctx, "title": title}
 
-                # Check if it results in another positive context
-                if answers_spans is not None and len(answers_spans) > 0:
-                    new_positive_ctxs.append(aug_ctx)
-                else:
-                    new_positive_ctxs.append(orig_ctx)
-            positive_ctxs = new_positive_ctxs
+            # Check if it results in another positive context
+            if answers_spans is not None and len(answers_spans) > 0:
+                new_positive_ctxs.append(aug_ctx)
+            else:
+                new_positive_ctxs.append(orig_ctx)
+        positive_ctxs = new_positive_ctxs
 
-            # Negatives
-            new_negative_ctxs = []
-            for ctx in negative_ctxs:
-                passage_id = int(ctx["id"])
-                ctx, aug_ctx, title, answers_spans = self._boundary_aug(
-                    passage_id, answers)
-                orig_ctx = {"text": ctx, "title": title}
-                aug_ctx = {"text": aug_ctx, "title": title}
+        # Negatives
+        new_negative_ctxs = []
+        for ctx in negative_ctxs:
+            passage_id = int(ctx["id"])
+            ctx, aug_ctx, title, answers_spans = self._boundary_aug(
+                passage_id, answers)
+            orig_ctx = {"text": ctx, "title": title}
+            aug_ctx = {"text": aug_ctx, "title": title}
 
-                # Check if it results in another positive context
-                if answers_spans is not None and len(answers_spans) > 0:
-                    new_negative_ctxs.append(orig_ctx)
-                else:
-                    new_negative_ctxs.append(aug_ctx)
-            negative_ctxs = new_negative_ctxs
+            # Check if it results in another positive context
+            if answers_spans is not None and len(answers_spans) > 0:
+                new_negative_ctxs.append(orig_ctx)
+            else:
+                new_negative_ctxs.append(aug_ctx)
+        negative_ctxs = new_negative_ctxs
 
-            new_hard_negative_ctxs = []
-            for ctx in hard_negative_ctxs:
-                passage_id = int(ctx["id"])
-                ctx, aug_ctx, title, answers_spans = self._boundary_aug(
-                    passage_id, answers)
-                orig_ctx = {"text": ctx, "title": title}
-                aug_ctx = {"text": aug_ctx, "title": title}
+        new_hard_negative_ctxs = []
+        for ctx in hard_negative_ctxs:
+            passage_id = int(ctx["id"])
+            ctx, aug_ctx, title, answers_spans = self._boundary_aug(
+                passage_id, answers)
+            orig_ctx = {"text": ctx, "title": title}
+            aug_ctx = {"text": aug_ctx, "title": title}
 
-                # Check if it results in another positive context
-                if answers_spans is not None and len(answers_spans) > 0:
-                    new_hard_negative_ctxs.append(orig_ctx)
-                else:
-                    new_hard_negative_ctxs.append(aug_ctx)
-            hard_negative_ctxs = new_hard_negative_ctxs
+            # Check if it results in another positive context
+            if answers_spans is not None and len(answers_spans) > 0:
+                new_hard_negative_ctxs.append(orig_ctx)
+            else:
+                new_hard_negative_ctxs.append(aug_ctx)
+        hard_negative_ctxs = new_hard_negative_ctxs
 
         for ctx in positive_ctxs + negative_ctxs + hard_negative_ctxs:
             if "title" not in ctx:
