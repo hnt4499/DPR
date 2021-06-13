@@ -339,13 +339,14 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
     def _boundary_aug(self, index: int, answers: List[str]):
         def tokenize(t):
             """Shorcut for tokenizer"""
-            return self.tensorizer.tokenizer.encode(
+            tokenized_ids = self.tensorizer.tokenizer.encode(
                 t,
                 add_special_tokens=False,
                 max_length=10000,
                 pad_to_max_length=False,
                 truncation=True,
             )
+            return np.array(tokenized_ids)
 
         def id_to_token(id):
             """Convert a single token ID to token string"""
@@ -397,7 +398,10 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
                 else:
                     break
 
-            aug_ids = prev_passage_ids[left_aug_idx:] + text_ids[:right_aug_idx]
+            aug_ids = np.concatenate([
+                prev_passage_ids[left_aug_idx:],
+                text_ids[:right_aug_idx],
+            ])
 
         elif length_to_augment > 0:  # augment with next passage
             # Shrink until we find a token that is not a subword
@@ -417,7 +421,10 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
                 else:
                     break
 
-            aug_ids = text_ids[left_aug_idx:] + next_passage_ids[:right_aug_idx]
+            aug_ids = np.concatenate([
+                text_ids[left_aug_idx:],
+                next_passage_ids[:right_aug_idx],
+            ])
 
         else:
             aug_ids = None
