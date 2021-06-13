@@ -350,7 +350,7 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
 
         def id_to_token(id):
             """Convert a single token ID to token string"""
-            return self.tensorizer.tokenizer.convert_ids_to_tokens(id)
+            return self.tensorizer.tokenizer.convert_ids_to_tokens(int(id))
 
         data = self.all_passages.loc[index]
         text, title = data[["text", "title"]]
