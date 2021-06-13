@@ -293,6 +293,7 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
         normalize: bool = False,
         query_special_suffix: str = None,
         ctx_boundary_aug: int = 0,
+        ctx_aug_prob: float = 0.0,
         sample_by_cat: bool = False,
         category_mapping_path: str = None,
         sampled_idxs_path: str = None,
@@ -313,9 +314,11 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
             sampled_idxs_path=sampled_idxs_path,
         )
         self.all_passages_file = all_passages_file
+        self.ctx_aug_prob = ctx_aug_prob
 
-    def load_data(self, datasets: List[torch.utils.data.Dataset]):
+    def load_data(self, datasets: List[torch.utils.data.Dataset], tensorizer: Tensorizer):
         super(JsonQADatasetWithAllPassages, self).load_data()
+        self.tensorizer = tensorizer
 
         # Retrieve all passages if possible
         all_passages = None
@@ -333,46 +336,113 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
         else:
             self.all_passages = all_passages
 
-    def _boundary_aug(self, index):
+    def _boundary_aug(self, index: int, answers: List[str]):
+        def tokenize(t):
+            """Shorcut for tokenizer"""
+            return self.tensorizer.tokenizer.encode(
+                t,
+                add_special_tokens=False,
+                max_length=10000,
+                pad_to_max_length=False,
+                truncation=True,
+            )
+
+        def id_to_token(id):
+            """Convert a single token ID to token string"""
+            return self.tensorizer.tokenizer.convert_ids_to_tokens(id)
+
         data = self.all_passages.loc[index]
         text, title = data[["text", "title"]]
 
         if self.ctx_boundary_aug <= 0:
             if title in ["nan", "NaN"] or title is np.nan:
                 title = None
-            return text, text, title
+            return text, text, title, None
+
+        text_ids = tokenize(text)
+        answers_ids = [tokenize(answer) for answer in answers]
 
         # Previous passage
         length_to_augment = [0]  # 0 means no augmentation
         if index - 1 in self.all_passages.index and self.all_passages.loc[index - 1, "title"] == title:
             prev_passage = self.all_passages.loc[index - 1, "text"]
+            prev_passage_ids = tokenize(prev_passage)
+
             length_to_augment.extend(range(-self.ctx_boundary_aug, 0))
 
         # Next passage
         if index + 1 in self.all_passages.index and self.all_passages.loc[index + 1, "title"] == title:
             next_passage = self.all_passages.loc[index + 1, "text"]
+            next_passage_ids = tokenize(next_passage)
+
             length_to_augment.extend(range(1, self.ctx_boundary_aug + 1))
 
         length_to_augment = random.choice(length_to_augment)
-        aug_text = text.split()
-        original_length = len(aug_text)
 
         if length_to_augment < 0:  # augment with previous passage
-            prev_passage = prev_passage.split()
-            aug_text = prev_passage[length_to_augment:] + aug_text[:length_to_augment]
-            assert len(aug_text) == original_length, (text, " ".join(aug_text))
-        elif length_to_augment > 0:  # augment with next passage
-            next_passage = next_passage.split()
-            aug_text = aug_text[length_to_augment:] + next_passage[:length_to_augment]
-            assert len(aug_text) == original_length, (text, " ".join(aug_text))
+            # Shrink until we find a token that is not a subword
+            left_aug_idx = len(prev_passage_ids) + length_to_augment
+            while True:
+                token_str: str = id_to_token(prev_passage_ids[left_aug_idx])
+                if token_str.startswith("##") or token_str.startswith(" ##"):
+                    left_aug_idx += 1
+                else:
+                    break
 
-        aug_text = " ".join(aug_text)
+            right_aug_idx = len(text_ids) + length_to_augment
+            while True:
+                token_str: str = id_to_token(text_ids[right_aug_idx + 1])
+                if token_str.startswith("##") or token_str.startswith(" ##"):
+                    right_aug_idx -= 1
+                else:
+                    break
+
+            aug_ids = prev_passage_ids[left_aug_idx:] + text_ids[:right_aug_idx]
+
+        elif length_to_augment > 0:  # augment with next passage
+            # Shrink until we find a token that is not a subword
+            left_aug_idx = length_to_augment
+            while True:
+                token_str: str = id_to_token(text_ids[left_aug_idx])
+                if token_str.startswith("##") or token_str.startswith(" ##"):
+                    left_aug_idx += 1
+                else:
+                    break
+
+            right_aug_idx = length_to_augment
+            while True:
+                token_str: str = id_to_token(next_passage_ids[right_aug_idx + 1])
+                if token_str.startswith("##") or token_str.startswith(" ##"):
+                    right_aug_idx -= 1
+                else:
+                    break
+
+            aug_ids = text_ids[left_aug_idx:] + next_passage_ids[:right_aug_idx]
+
+        else:
+            aug_ids = None
+
+        if aug_ids is None:
+            aug_text = text
+            answers_spans = None
+        else:
+            # Re-parse answers
+            answers_spans = [
+                _find_answer_positions(aug_ids, answer_ids)
+                for answer_ids in answers_ids
+            ]
+            answers_spans = sum(answers_spans, [])  # flatten
+            answers_spans = list(filter(None, answers_spans))  # remove invalid entries
+            aug_text = self.tensorizer.tokenizer.decode(aug_ids)
+
         if title in ["nan", "NaN"] or title is np.nan:
             title = None
 
-        return text, aug_text, title
+        return text, aug_text, title, answers_spans
 
     def __getitem__(self, index) -> BiEncoderSample:
+        self.tensorizer.set_pad_to_max(False)
+
         json_sample = self.data[index]
         r = BiEncoderSample()
         r.query = self._process_query(json_sample["question"])
@@ -389,58 +459,53 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
         )
 
         # Context boundary augmentation
+        if self.ctx_boundary_aug > 0 and random.random() < self.ctx_aug_prob:
+            # Positives
+            new_positive_ctxs = []
+            for ctx in positive_ctxs:
+                passage_id = int(ctx["id"])
+                ctx, aug_ctx, title, answers_spans = self._boundary_aug(
+                    passage_id, answers)  # do boundary augmentation
+                orig_ctx = {"text": ctx, "title": title}
+                aug_ctx = {"text": aug_ctx, "title": title}
 
-        # Positives
-        extreme_hard_negative_ctxs = []  # "extremely" hard negative contexts
-        new_positive_ctxs = []
-        for ctx in positive_ctxs:
-            passage_id = int(ctx["id"])
-            ctx, aug_ctx, title = self._boundary_aug(passage_id)  # do boundary augmentation
-            orig_ctx = {"text": ctx, "title": title}
-            aug_ctx = {"text": aug_ctx, "title": title}
+                # Check if it results in another positive context
+                if answers_spans is not None and len(answers_spans) > 0:
+                    new_positive_ctxs.append(aug_ctx)
+                else:
+                    new_positive_ctxs.append(orig_ctx)
+            positive_ctxs = new_positive_ctxs
 
-            # Check if it results in another positive context
-            if any(answer.lower() in aug_ctx["text"].lower() for answer in answers):
-                new_positive_ctxs.append(aug_ctx)
-            else:
-                new_positive_ctxs.append(orig_ctx)
-                extreme_hard_negative_ctxs.append(aug_ctx)
-        positive_ctxs = new_positive_ctxs
+            # Negatives
+            new_negative_ctxs = []
+            for ctx in negative_ctxs:
+                passage_id = int(ctx["id"])
+                ctx, aug_ctx, title, answers_spans = self._boundary_aug(
+                    passage_id, answers)
+                orig_ctx = {"text": ctx, "title": title}
+                aug_ctx = {"text": aug_ctx, "title": title}
 
-        # Negatives
-        new_negative_ctxs = []
-        for ctx in negative_ctxs:
-            passage_id = int(ctx["id"])
-            ctx, aug_ctx, title = self._boundary_aug(passage_id)  # we assume that this does not result in positive passage
-            orig_ctx = {"text": ctx, "title": title}
-            aug_ctx = {"text": aug_ctx, "title": title}
+                # Check if it results in another positive context
+                if answers_spans is not None and len(answers_spans) > 0:
+                    new_negative_ctxs.append(orig_ctx)
+                else:
+                    new_negative_ctxs.append(aug_ctx)
+            negative_ctxs = new_negative_ctxs
 
-            # Check if it results in another positive context
-            if any(answer.lower() in aug_ctx["text"].lower() for answer in answers):
-                positive_ctxs.append(aug_ctx)
-                new_negative_ctxs.append(orig_ctx)
-            else:
-                new_negative_ctxs.append(aug_ctx)
-        negative_ctxs = new_negative_ctxs
+            new_hard_negative_ctxs = []
+            for ctx in hard_negative_ctxs:
+                passage_id = int(ctx["id"])
+                ctx, aug_ctx, title, answers_spans = self._boundary_aug(
+                    passage_id, answers)
+                orig_ctx = {"text": ctx, "title": title}
+                aug_ctx = {"text": aug_ctx, "title": title}
 
-        new_hard_negative_ctxs = []
-        for ctx in hard_negative_ctxs:
-            passage_id = int(ctx["id"])
-            ctx, aug_ctx, title = self._boundary_aug(passage_id)
-            orig_ctx = {"text": ctx, "title": title}
-            aug_ctx = {"text": aug_ctx, "title": title}
-
-            # Check if it results in another positive context
-            if any(answer.lower() in aug_ctx["text"].lower() for answer in answers):
-                positive_ctxs.append(aug_ctx)
-                new_hard_negative_ctxs.append(orig_ctx)
-            else:
-                new_hard_negative_ctxs.append(aug_ctx)
-        hard_negative_ctxs = new_hard_negative_ctxs
-
-        # Make "extremely" hard negative contexts more likely to be chosen
-        to_add = 1 if len(hard_negative_ctxs) == 0 else len(hard_negative_ctxs)
-        hard_negative_ctxs.extend(extreme_hard_negative_ctxs * to_add)
+                # Check if it results in another positive context
+                if answers_spans is not None and len(answers_spans) > 0:
+                    new_hard_negative_ctxs.append(orig_ctx)
+                else:
+                    new_hard_negative_ctxs.append(aug_ctx)
+            hard_negative_ctxs = new_hard_negative_ctxs
 
         for ctx in positive_ctxs + negative_ctxs + hard_negative_ctxs:
             if "title" not in ctx:
@@ -455,6 +520,8 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
         r.positive_passages = [create_passage(ctx) for ctx in positive_ctxs]
         r.negative_passages = [create_passage(ctx) for ctx in negative_ctxs]
         r.hard_negative_passages = [create_passage(ctx) for ctx in hard_negative_ctxs]
+
+        self.tensorizer.set_pad_to_max(True)
         return r
 
 

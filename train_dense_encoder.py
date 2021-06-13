@@ -151,7 +151,7 @@ class BiEncoderTrainer(object):
 
         for dataset in datasets_list:
             if isinstance(dataset, JsonQADatasetWithAllPassages):
-                dataset.load_data(datasets_list)
+                dataset.load_data(datasets_list, tensorizer=self.tensorizer)
             elif isinstance(dataset, GeneralDatasetScheme):
                 dataset.load_data(wiki_data=self.ds_cfg.wiki_data, tensorizer=self.tensorizer)
             else:

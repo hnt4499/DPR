@@ -44,6 +44,7 @@ def init_hf_bert_biencoder_single_model_match(args, **kwargs):
     from .hf_models_single_model_match import get_bert_biencoder_components
     return get_bert_biencoder_components(args, **kwargs)
 
+
 def init_hf_bert_biencoder_single_model_match_gated(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
@@ -55,6 +56,13 @@ def init_hf_bert_biencoder_single_model_with_projector(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
     from .hf_models_single_model_with_projector import get_bert_biencoder_components
+    return get_bert_biencoder_components(args, **kwargs)
+
+
+def init_hf_bert_biencoder_single_model_barlow_twins(args, **kwargs):
+    if importlib.util.find_spec("transformers") is None:
+        raise RuntimeError('Please install transformers lib')
+    from .hf_models_single_model_barlow_twins import get_bert_biencoder_components
     return get_bert_biencoder_components(args, **kwargs)
 
 
@@ -79,6 +87,7 @@ BIENCODER_INITIALIZERS = {
     'hf_bert_single_model_match': init_hf_bert_biencoder_single_model_match,
     'hf_bert_single_model_match_gated': init_hf_bert_biencoder_single_model_match_gated,
     'hf_bert_single_model_with_projector': init_hf_bert_biencoder_single_model_with_projector,
+    'hf_bert_single_model_barlow_twins': init_hf_bert_biencoder_single_model_barlow_twins,
 
     'pytext_bert': init_pytext_bert_biencoder,
     'fairseq_roberta': init_fairseq_roberta_biencoder,
@@ -203,6 +212,13 @@ def init_hf_bert_tenzorizer_single_model_with_projector(args, **kwargs):
     return get_bert_tensorizer(args)
 
 
+def init_hf_bert_tenzorizer_single_model_barlow_twins(args, **kwargs):
+    if importlib.util.find_spec("transformers") is None:
+        raise RuntimeError('Please install transformers lib')
+    from .hf_models_single_model_barlow_twins import get_bert_tensorizer
+    return get_bert_tensorizer(args)
+
+
 def init_hf_bert_ofa_simple_tensorizer(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
@@ -238,6 +254,7 @@ TENSORIZER_INITIALIZERS = {
     'hf_bert_single_model_match': init_hf_bert_tenzorizer_single_model_match,
     'hf_bert_single_model_match_gated': init_hf_bert_tenzorizer_single_model_match_gated,
     'hf_bert_single_model_with_projector': init_hf_bert_tenzorizer_single_model_with_projector,
+    'hf_bert_single_model_barlow_twins': init_hf_bert_tenzorizer_single_model_barlow_twins,
 
     'hf_bert_ofa_simple': init_hf_bert_ofa_simple_tensorizer,
     'hf_bert_simple_ofa': init_hf_bert_ofa_simple_tensorizer,  # for backward compatibility
@@ -292,6 +309,13 @@ def init_hf_bert_loss_single_model_with_projector(args, **kwargs):
     return BiEncoderNllLoss(args)
 
 
+def init_hf_bert_loss_single_model_barlow_twins(args, **kwargs):
+    if importlib.util.find_spec("transformers") is None:
+        raise RuntimeError('Please install transformers lib')
+    from .biencoder import BiEncoderBarlowTwinsLoss
+    return BiEncoderBarlowTwinsLoss(args)
+
+
 def init_hf_bert_loss_ofa_simple(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
@@ -327,6 +351,7 @@ LOSS_INITIALIZERS = {
     'hf_bert_single_model_match': init_hf_bert_loss_single_model_match,
     'hf_bert_single_model_match_gated': init_hf_bert_loss_single_model_match_gated,
     'hf_bert_single_model_with_projector': init_hf_bert_loss_single_model_with_projector,
+    'hf_bert_single_model_barlow_twins': init_hf_bert_loss_single_model_barlow_twins,
 
     'hf_bert_ofa_simple': init_hf_bert_loss_ofa_simple,
     'hf_bert_simple_ofa': init_hf_bert_loss_ofa_simple,  # for backward compatibility
