@@ -355,7 +355,7 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
         data = self.all_passages.loc[index]
         text, title = data[["text", "title"]]
 
-        if self.ctx_boundary_aug <= 0 or random.random() < self.ctx_aug_prob:
+        if self.ctx_boundary_aug <= 0 or random.random() >= self.ctx_aug_prob:
             if title in ["nan", "NaN"] or title is np.nan:
                 title = None
             return text, text, title, None
