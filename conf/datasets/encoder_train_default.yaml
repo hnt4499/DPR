@@ -55,6 +55,15 @@ nq_train_hn1_aug_2:
   ctx_boundary_aug: 20
   ctx_aug_prob: 0.3
 
+nq_train_hn1_aug_2_cat:
+  _target_: dpr.data.biencoder_data.JsonQADatasetWithAllPassages
+  file: /data/tuyen/openqa/DPR/notebooks/4_aug/data/nq-adv-hn-train-no-text.json
+  sample_by_cat: true
+  sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled_puffer/nq-adv-hn-train-{}.json
+  all_passages_file: /data/tuyen/openqa/DPR/notebooks/4_aug/data/psgs_w100_for_aug_processed.csv
+  ctx_boundary_aug: 20
+  ctx_aug_prob: 0.3
+
 nq_train_hn1_cat:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-adv-hn-train
