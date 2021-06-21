@@ -28,6 +28,7 @@ class BERTWithProjector(nn.Module):
         super(BERTWithProjector, self).__init__()
         self.base_encoder = base_encoder
         self.config = self.base_encoder.config
+        self.project_dims = project_dims
 
         # Projector head
         if isinstance(project_dims, int):
@@ -58,6 +59,9 @@ class BERTWithProjector(nn.Module):
 
     def resize_token_embeddings(self, *args, **kwargs):
         return self.base_encoder.resize_token_embeddings(*args, **kwargs)
+
+    def get_out_size(self):
+        return self.project_dims[-1]
 
 
 def get_bert_biencoder_components(cfg, inference_only: bool = False, **kwargs):
