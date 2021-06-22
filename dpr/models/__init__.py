@@ -375,6 +375,7 @@ LOSS_INITIALIZERS = {
     'hf_bert_single_model_match_gated': init_hf_bert_loss_single_model_match_gated,
     'hf_bert_single_model_with_projector': init_hf_bert_loss_single_model_with_projector,
     'hf_bert_single_model_barlow_twins': init_hf_bert_loss_single_model_barlow_twins,
+    'hf_bert_single_model_score_scaling': init_hf_bert_loss_single_model_score_scaling,
 
     'hf_bert_ofa_simple': init_hf_bert_loss_ofa_simple,
     'hf_bert_simple_ofa': init_hf_bert_loss_ofa_simple,  # for backward compatibility
