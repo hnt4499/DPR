@@ -434,9 +434,11 @@ class BiEncoder(nn.Module):
 class BiEncoderNllLoss(object):
     def __init__(
         self,
-        cfg
+        cfg,
+        score_scaling: bool = False,  # http://arxiv.org/abs/2101.00408
     ):
         self.cfg = cfg
+        self.score_scaling = score_scaling
 
     def calc(
         self,
@@ -457,6 +459,13 @@ class BiEncoderNllLoss(object):
         if len(q_vectors.size()) > 1:
             q_num = q_vectors.size(0)
             scores = scores.view(q_num, -1)
+
+        # Score scaling, as described in the paper:
+        # Sachan, D. S., Patwary, M., Shoeybi, M., Kant, N., Ping, W., Hamilton, W. L., & Catanzaro, B. (2021).
+        # End-to-End Training of Neural Retrievers for Open-Domain Question Answering.
+        if self.score_scaling:
+            hidden_size = q_vectors.shape[1]
+            scores = scores / (hidden_size ** 0.5)
 
         return self.calc_given_score_matrix(scores, positive_idx_per_question, loss_scale=loss_scale)
 
