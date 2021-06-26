@@ -19,6 +19,7 @@ fix_ctx_encoder: False
 val_av_rank_start_epoch: 30
 seed: 12345
 checkpoint_file_name: dpr_biencoder
+checkpoint_start_epoch: 30  # epoch to start checkpointing (i.e., saving model)
 
 # A trained bi-encoder checkpoint file to initialize the model
 model_file:

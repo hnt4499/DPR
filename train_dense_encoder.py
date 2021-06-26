@@ -272,7 +272,7 @@ class BiEncoderTrainer(object):
             else:
                 validation_loss = self.validate_nll()
 
-        if save_cp:
+        if save_cp and epoch >= cfg.checkpoint_start_epoch:
             cp_name = self._save_checkpoint(scheduler, epoch, iteration)
             logger.info("Saved checkpoint to %s", cp_name)
 
@@ -280,6 +280,8 @@ class BiEncoderTrainer(object):
                 self.best_validation_result = validation_loss
                 self.best_cp_name = cp_name
                 logger.info("New Best validation checkpoint %s", cp_name)
+        else:
+            logger.info("Model is not saved.")
 
     def validate_nll(self) -> float:
         logger.info("NLL validation ...")
