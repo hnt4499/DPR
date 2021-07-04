@@ -203,7 +203,7 @@ BiEncoderBatch = collections.namedtuple(
 
 
 """
-Reader
+Extractive reader
 """
 
 class ReaderPassage(DataPassage):
@@ -236,6 +236,27 @@ SpanPrediction = collections.namedtuple(
         "relevance_score",
         "passage_index",
         "passage_token_ids",
+    ],
+)
+
+
+"""
+Reader
+"""
+
+class GenerativeReaderPassage(ReaderPassage):
+    pass
+
+
+class GenerativeReaderSample(ReaderSample):
+    pass
+
+GenerativeReaderBatch = collections.namedtuple(
+    'GenerativeReaderBatch',
+    [
+        'context_IDs',
+        'input_ids',
+        'answer_ids',
     ],
 )
 

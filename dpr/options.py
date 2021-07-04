@@ -43,6 +43,23 @@ def set_cfg_params_from_state(state: dict, cfg: DictConfig):
             cfg.encoder.encoder_model_type = state["encoder_model_type"]
 
 
+def set_extractive_reader_cfg_params_from_state(state: dict, cfg: DictConfig):
+    """
+    Overrides some of the encoder config parameters from a give state object
+    """
+    if not state:
+        return
+    cfg.encoder.pretrained_model_cfg = state["pretrained_model_cfg"]
+    cfg.encoder.context_max_length = state["context_max_length"]
+    cfg.encoder.answer_max_length = state["answer_max_length"]
+
+    if cfg.encoder.encoder_model_type != state["encoder_model_type"]:
+        logger.warn(f"Model type specified in the config file ('{cfg.encoder.encoder_model_type}') and model type "
+                    f"obtained from the checkpoint ('{state['encoder_model_type']}') are different")
+        if not cfg.ignore_pretrained_model_type:
+            cfg.encoder.encoder_model_type = state["encoder_model_type"]
+
+
 def get_encoder_params_state_from_cfg(cfg: DictConfig):
     """
     Selects the param values to be saved in a checkpoint, so that a trained model can be used for downstream
@@ -56,6 +73,20 @@ def get_encoder_params_state_from_cfg(cfg: DictConfig):
         "pretrained_file": cfg.encoder.pretrained_file,
         "projection_dim": cfg.encoder.projection_dim,
         "sequence_length": cfg.encoder.sequence_length,
+    }
+
+
+def get_generative_reader_params_state_from_cfg(cfg: DictConfig):
+    """
+    Selects the param values to be saved in a checkpoint, so that a trained model can be used for downstream
+    tasks without the need to specify these parameter again
+    :return: Dict of params to memorize in a checkpoint
+    """
+    return {
+        "pretrained_model_cfg": cfg.encoder.pretrained_model_cfg,
+        "encoder_model_type": cfg.encoder.encoder_model_type,
+        "context_max_length": cfg.encoder.context_max_length,
+        "answer_max_length": cfg.encoder.answer_max_length,
     }
 
 

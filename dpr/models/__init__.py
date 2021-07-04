@@ -106,7 +106,7 @@ def init_biencoder_components(encoder_type: str, args, **kwargs):
     return init_comp(BIENCODER_INITIALIZERS, encoder_type, args, **kwargs)
 
 
-"""------------------------------- Reader -------------------------------"""
+"""---------------------------- Extractive Reader ----------------------------"""
 
 
 def init_hf_bert_reader(args, **kwargs):
@@ -180,6 +180,24 @@ OFA_INITIALIZERS = {
 
 def init_ofa_model(encoder_type: str, args, **kwargs):
     return init_comp(OFA_INITIALIZERS, encoder_type, args, **kwargs)
+
+
+"""---------------------------- Generative Reader ----------------------------"""
+
+
+def init_fid_base_generative_reader(args, **kwargs):
+    if importlib.util.find_spec("transformers") is None:
+        raise RuntimeError('Please install transformers lib')
+    from .fid_base import get_generative_reader_components
+    return get_generative_reader_components(args, **kwargs)
+
+
+GENERATIVE_READER_INITIALIZERS = {
+    'fid_base': init_fid_base_generative_reader,
+}
+
+def init_generative_reader_components(encoder_type: str, args, **kwargs):
+    return init_comp(GENERATIVE_READER_INITIALIZERS, encoder_type, args, **kwargs)
 
 
 """------------------------------- Tensorizer -------------------------------"""
@@ -262,6 +280,14 @@ def init_hf_roberta_tenzorizer(args, **kwargs):
     return get_roberta_tensorizer(args)
 
 
+"""Generative reader tensorizer for preprocessing"""
+def init_fid_base_tensorizer(args, **kwargs):
+    if importlib.util.find_spec("transformers") is None:
+        raise RuntimeError('Please install transformers lib')
+    from .fid_base import get_generative_tensorizer
+    return get_generative_tensorizer(args)
+
+
 TENSORIZER_INITIALIZERS = {
     'hf_bert': init_hf_bert_tenzorizer,
 
@@ -276,6 +302,9 @@ TENSORIZER_INITIALIZERS = {
     'hf_bert_simple_ofa': init_hf_bert_ofa_simple_tensorizer,  # for backward compatibility
     'hf_bert_ofa_with_passage_scores': init_hf_bert_ofa_with_passage_scores_tensorizer,
     'hf_bert_ofa_special_tokens': init_hf_bert_ofa_special_tokens_tensorizer,
+
+    # Generative reader
+    'fid_base': init_fid_base_tensorizer,
 
     'hf_roberta': init_hf_roberta_tenzorizer,
     'pytext_bert': init_hf_bert_tenzorizer,  # using HF's code as of now

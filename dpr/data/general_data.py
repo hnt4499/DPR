@@ -376,6 +376,8 @@ PreprocessingCfg = collections.namedtuple(
         "should_negatives_contain_answer",
         # In retriever (NOT reader) data preparing step, question (but NOT passages) are normalized
         "normalize_questions",
+        # Set True for generative reader (FiD), where positive or negative don't matter
+        "skip_finding_answer_spans",
     ],
 )
 
@@ -389,6 +391,25 @@ DEFAULT_PREPROCESSING_CFG_TRAIN = PreprocessingCfg(
     recheck_negatives=False,  # see description above
     should_negatives_contain_answer=False,  # see description above
     normalize_questions=True,  # see description above
+    skip_finding_answer_spans=False,
+)
+
+"""
+Data for the generative reader (FiD) has been processed using
+the config below. Change it to `DEFAULT_PREPROCESSING_CFG_TRAIN`
+to reproduce
+"""
+DEFAULT_PREPROCESSING_CFG_TRAIN_GENERATIVE_READER = PreprocessingCfg(
+    skip_no_positives=False,
+    include_gold_passage=False,  # whether to include the gold passage itself
+    gold_page_only_positives=False,  # whether positive passages should only be from the gold passages
+    expand_answers=True,  # expand the set of answers; see `answers_processing.py`
+    max_bm25_positives=10,
+    max_bm25_negatives=30,
+    recheck_negatives=False,  # see description above
+    should_negatives_contain_answer=False,  # see description above
+    normalize_questions=True,  # see description above
+    skip_finding_answer_spans=True,
 )
 
 
@@ -553,6 +574,7 @@ def _select_passages(
             warn_if_no_answer=True, raise_if_no_answer=False,
             warn_if_has_answer=False, raise_if_has_answer=False,
             recheck_negatives=False,
+            skip_finding_answer_spans=cfg.skip_finding_answer_spans,
         )  # find answer spans for all passages
         if gold_ctx.has_answer:
             gold_ctxs = [gold_ctx]
@@ -574,6 +596,7 @@ def _select_passages(
             warn_if_no_answer=ctx.has_answer,  # warn if originally it contains answer string
             warn_if_has_answer=(not ctx.has_answer),  # warn if originally it does NOT contain answer string
             recheck_negatives=cfg.recheck_negatives,
+            skip_finding_answer_spans=cfg.skip_finding_answer_spans,
         )
         for ctx in ctxs
     ]
@@ -593,6 +616,7 @@ def _select_passages(
             tensorizer, ctx, question, all_answers, answers_token_ids,
             warn_if_no_answer=False, warn_if_has_answer=False,
             recheck_negatives=True,  # `has_answer` of any BM25 passage is None
+            skip_finding_answer_spans=cfg.skip_finding_answer_spans,
         )
         for ctx in bm25_ctxs
     ]
@@ -657,6 +681,7 @@ def _select_passages(
                     tensorizer, gold_passage, question, all_answers, answers_token_ids,
                     warn_if_no_answer=False, warn_if_has_answer=False,
                     recheck_negatives=True,
+                    skip_finding_answer_spans=cfg.skip_finding_answer_spans,
                 )  # warn below
 
                 if not gold_passage.has_answer:
@@ -746,7 +771,12 @@ def _find_answer_spans(
     warn_if_has_answer: bool = False,
     raise_if_has_answer: bool = False,
     recheck_negatives: bool = False,
+    skip_finding_answer_spans: bool = False,  # for generative reader (FiD), where positive or negative don't matter
 ) -> DataPassage:
+
+    if skip_finding_answer_spans:
+        return ctx
+
     if (not recheck_negatives) and (not ctx.has_answer):
         return ctx
 

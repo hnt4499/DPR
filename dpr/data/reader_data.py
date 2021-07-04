@@ -27,7 +27,12 @@ logger = logging.getLogger()
 
 class ExtractiveReaderGeneralDataset(OneForAllDataset):
     def __init__(self, **kwargs):
-        super(ExtractiveReaderGeneralDataset, self).__init__(mode="reader" ,**kwargs)
+        super(ExtractiveReaderGeneralDataset, self).__init__(mode="reader", **kwargs)
+
+
+class GenerativeReaderGeneralDataset(OneForAllDataset):
+    def __init__(self, **kwargs):
+        super(GenerativeReaderGeneralDataset, self).__init__(mode="reader", **kwargs)
 
 
 """
