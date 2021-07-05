@@ -10,7 +10,7 @@ pretrained_model_cfg: t5-base
 pretrained_file:
 
 # Max length of the encoder input sequence
-context_max_length: 350
+context_max_length: 256
 answer_max_length: 20
 
 dropout: 0.1

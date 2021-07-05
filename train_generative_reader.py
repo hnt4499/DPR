@@ -19,7 +19,6 @@ import logging
 import numpy as np
 import os
 import torch
-torch.autograd.set_detect_anomaly(True)
 
 from omegaconf import DictConfig, OmegaConf
 from typing import List
@@ -74,7 +73,7 @@ class ReaderTrainer(object):
                 f"Resume has not been implemented for generative reader"
             )
 
-        gradient_checkpointing = getattr(self.cfg, "gradient_checkpointing", True)
+        gradient_checkpointing = self.cfg.gradient_checkpointing
         tensorizer, reader, optimizer = init_generative_reader_components(
             cfg.encoder.encoder_model_type,
             cfg,
@@ -96,7 +95,7 @@ class ReaderTrainer(object):
         self.reader: FiDT5 = reader
         self.optimizer = optimizer
         self.tensorizer = tensorizer
-        self.debugging = getattr(self.cfg, "debugging", False)
+        self.debugging = self.cfg.debugging
         self.wiki_data = None
         self.dev_iterator = None
         self.start_epoch = 0

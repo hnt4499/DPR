@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 
+import inspect
 import logging
 import random
 from typing import List, Tuple, Union
@@ -125,7 +126,7 @@ class FiDT5(T5ForConditionalGeneration):
         self.decoder = wrap_gradient_checkpointing(
             self.decoder,
             device=self._device,
-            stack_level=True,
+            stack_level=False,
             gradient_checkpointing=self.gradient_checkpointing,
         )
 
@@ -206,11 +207,10 @@ class FiDT5Encoder(nn.Module):
 
     def forward(self, input_ids: T, attention_mask: T, **kwargs):
         """
-        Forward pass logic, which takes care of processing input passages
-        independently. Because of the forward pass of `FiDT5`, the inputs
-        (B, N * L) (to comply with T5). We hence need to reshape it the
-        other way round (i.e., (B * N, L)), so that each passage is
-        processed independently.
+        Forward pass logic, which takes care of processing input passages independently.
+        Because of the forward pass of `FiDT5`, the inputs was resized to (B, N * L)
+        (to comply with T5). We hence need to reshape it the other way round
+        (i.e., (B * N, L)), so that each passage is processed independently.
         """
         # Sanity check
         batch_size, total_length = input_ids.shape
@@ -227,25 +227,25 @@ class FiDT5Encoder(nn.Module):
         return outputs
 
 
-def _flatten(inputs, flattened_inputs: list, structure: list):
+def _flatten(inputs, flattened_inputs: list, structure: list, only_tensor: bool):
     """
     Helper for the `flatten` function.
     """
-    if inputs is None or isinstance(inputs, T):
-        flattened_inputs.append(inputs)
-        structure.append(-1)
-
-    elif isinstance(inputs, (list, tuple)):
+    if isinstance(inputs, (list, tuple)):
         sub_structure = []
         for input in inputs:
-            _flatten(input, flattened_inputs, sub_structure)
+            _flatten(input, flattened_inputs, sub_structure, only_tensor)
         structure.append(tuple(sub_structure))
+
+    elif (only_tensor and (inputs is None or isinstance(inputs, T))) or (not only_tensor):
+        flattened_inputs.append(inputs)
+        structure.append(-1)
 
     else:
         raise TypeError(f"Unrecognized input type: {type(inputs)}")
 
 
-def flatten(inputs):
+def flatten(inputs, only_tensor: bool):
     """"
     Recursively traverse the inputs and flatten it into a list of tensors.
     Also returns a list of structed objects that helps to recover the
@@ -257,6 +257,11 @@ def flatten(inputs):
         Input to flatten. Recursively speaking, sub-object of this
         `inputs` (including `inputs` itself) must be either a None,
         a tensor or a tuple/list of these types.
+    only_tensor : bool
+        If True, recursively check if every "leaf" object is either None
+        or a torch tensor. Raise an error if an object of another type
+        is found. This is useful for checking for outputs of `forward`
+        functions.
 
     Returns
     -------
@@ -265,7 +270,7 @@ def flatten(inputs):
     """
     flattened_inputs = []
     structure = []
-    _flatten(inputs, flattened_inputs, structure)
+    _flatten(inputs, flattened_inputs, structure, only_tensor)
     return tuple(flattened_inputs), structure[0]
 
 
@@ -296,6 +301,144 @@ def unflatten(inputs, structure: list):
     return unflatten_inputs[0]
 
 
+def convert_kwargs_to_args(func, args, kwargs, exclude_self: bool):
+    """
+    Inspect the input function `func` and convert positional arguments
+    (`args`) and keyword arguments (`kwargs`) to a tuple of positional arguments
+    (only `args`), while filling missing keyword arguments with their default values.
+
+    Example:
+    >>> def f(x, y=None, z=1, t=False):
+    >>>     pass
+    >>> convert_kwargs_to_args(f)  # raise TypeError, since `x` is a required argument
+    >>> convert_kwargs_to_args(f, 1)  # (1, None, 1, False)
+    >>> convert_kwargs_to_args(f, 1, t=True, y=[1, 2, 3])  # (1, [1, 2, 3], 1, True)
+
+    Parameters
+    ----------
+    exclude_self : bool
+        Whether to exclude `self` from the list of arguments. Useful for methods (not
+        functions).
+    """
+    # Get function specs
+    func_spec = inspect.getfullargspec(func)
+    func_args = func_spec.args[1:] if exclude_self else func_spec.args
+    func_defaults = func_spec.defaults  # kwargs' defaults
+    func_defaults = [] if func_defaults is None else list(func_defaults)
+
+    # Sanity check
+    if len(args) < len(func_args) - len(func_defaults):
+        num_missing = len(func_args) - len(func_defaults) - len(args)
+        args_missing = func_args[len(args):len(args) + num_missing]
+        args_missing = [
+            arg_missing for arg_missing in args_missing
+            if arg_missing not in kwargs
+        ]
+
+        if len(args_missing) > 0:
+            raise TypeError(
+                f"Missing {num_missing} required positional argument: {args_missing}"
+            )
+
+    # Process args and kwargs, merge them into args
+    all_args = list(args).copy()
+    # Collect all positional arguments that have been fed as keyword arguments
+    while len(all_args) < len(func_args) - len(func_defaults):
+        arg_name = func_args[len(all_args)]
+        assert arg_name in kwargs  # this has been checked in the previous code
+        value = kwargs.pop(arg_name)
+        all_args.append(value)
+
+    # Collect all keyword arguments in sequential order, filling missing values with default
+    # values
+    num_remain_args = len(func_args) - len(all_args)
+    remain_args = func_args[-num_remain_args:]
+    remain_defaults = func_defaults[-num_remain_args:]
+
+    for remain_arg, remain_default in zip(remain_args, remain_defaults):
+        if remain_arg in kwargs:
+            value = kwargs.pop(remain_arg)
+            all_args.append(value)
+        else:
+            all_args.append(remain_default)
+
+    assert len(kwargs) == 0
+    return tuple(all_args)
+
+
+def is_tensor(object):
+    """
+    Recursively check whether the input object is a tensor or a tuple / list of tensor.
+    Note that if one of the (sub-)objects is a tuple / list containing some tensors and
+    some non-tensors, this function will return False, considering that object as
+    non-tensor object.
+    """
+    if isinstance(object, T):
+        return True
+    elif isinstance(object, (list, tuple)):
+        is_tensors = [is_tensor(o) for o in object]
+        return all(is_tensors)
+    else:
+        return False
+
+
+def wrap_function(func, args, exclude_self: bool, _func=None):
+    """
+    This function pre-fills all non-tensor arguments with their provided values
+    and return a new function (wrapped over the original function) that only
+    accepts tensor arguments.
+
+    Parameters
+    ----------
+    args : tuple
+        Tuple of processed positional arguments returned by `convert_kwargs_to_args`.
+    exclude_self : bool
+        Whether to exclude `self` from the list of arguments. Useful for methods (not
+        functions).
+    _func
+        Function to be wrapped over. Normal usage is that: `func` is the forward
+        function and `_func` is the `__call__` function. If not provided, use
+        `func` instead.
+
+    Returns
+    -------
+    A tuple of (wrapped function, args), where args contains only tensor objects.
+    Calling `func(args)` would return the desired results.
+    """
+    # Get function specs
+    func_spec = inspect.getfullargspec(func)
+    func_args = func_spec.args[1:] if exclude_self else func_spec.args
+    if len(func_args) != len(args):
+        raise ValueError(
+            f"Arguments mismatch. Got {len(args)} arguments, while the function "
+            f"requires {len(func_args)} arguments. Make sure to check "
+            f"`exclude_self` option and that `args` is processed using the "
+            f"`convert_kwargs_to_args` function."
+        )
+
+    # Process args and kwargs
+    processed_arg_values = []  # tensor container
+    processed_arg_names = []  # contains argument name of corresponding `processed_args`
+    processed_kwargs = {}
+
+    for arg_value, arg_name in zip(args, func_args):
+        if is_tensor(arg_value):
+            processed_arg_values.append(arg_value)
+            processed_arg_names.append(arg_name)
+        else:
+            processed_kwargs[arg_name] = arg_value
+
+    # Wrap function
+    _func = _func if _func is not None else func
+    def wrapper(*args):
+        kwargs = processed_kwargs.copy()
+        args_with_names = dict(zip(processed_arg_names, args))
+        kwargs.update(args_with_names)
+        return _func(**kwargs)
+
+    return wrapper, processed_arg_values
+
+
 class CheckpointWrapper(nn.Module):
     """
     Wrapper replacing None outputs by empty tensors, which allows the use of
@@ -318,27 +461,48 @@ class CheckpointWrapper(nn.Module):
         Forward pass with gradient checkpointing.
         """
         if self.gradient_checkpointing and self.training:
+            # Convert all arguments into positional arguments; here we assume
+            # that the function of interest is `self.module.forward`
+            args = convert_kwargs_to_args(
+                self.module.forward,
+                args=args,
+                kwargs=kwargs,
+                exclude_self=True,
+            )
+            # Pre-fill the function with arguments that are not tensors
+            wrapped_func, args = wrap_function(
+                self.module.forward,
+                args=args,
+                exclude_self=True,
+                _func=self.module.__call__,  # wrap over this function instead of `forward`
+            )
+
+            # Flatten the arguments so that all Tensors are present at the root level
+            args, input_structure = flatten(args, only_tensor=False)
+            output_structure = []  # workaround to get output structure from inside `custom_forward`
 
             def get_empty_tensor():
                 """Helper function to get empty tensor with gradients"""
                 empty = torch.tensor(
                     [],
-                    dtype=torch.float,
+                    dtype=torch.float32,
                     device=self._device,
                     requires_grad=True,
                 )
                 return empty
 
-            structure = []  # workaround
+            def custom_forward(dummy, *_args):
+                # Unflatten the inputs
+                _args = unflatten(_args, input_structure)
 
-            def custom_forward(*_args):
-                output: List[Union[T, Tuple[T]]] = self.module(*_args, **kwargs)
+                # Forward
+                output: List[Union[T, Tuple[T]]] = wrapped_func(*_args)
 
                 # Flatten output
-                output, structure_ = flatten(output)
-                structure.append(structure_)
+                output, output_structure_ = flatten(output, only_tensor=True)
+                output_structure.append(output_structure_)
 
-                # Replace None with a trainable tensor
+                # Replace None with a tensor that requires grad
                 output = [
                     output_i if output_i is not None else get_empty_tensor()
                     for output_i in output
@@ -347,6 +511,7 @@ class CheckpointWrapper(nn.Module):
 
             output: List[T] = checkpoint(
                 custom_forward,
+                get_empty_tensor(),  # need at least one tensor that requires grad
                 *args,
             )
 
@@ -355,7 +520,7 @@ class CheckpointWrapper(nn.Module):
                 output_i if output_i.numel() > 0 else None
                 for output_i in list(output)
             ]
-            output = unflatten(output, structure[0])
+            output = unflatten(output, output_structure[0])
 
         else:
             output = self.module(*args, **kwargs)
@@ -396,6 +561,7 @@ def wrap_gradient_checkpointing(
             )
             wrapped_block.append(wrapped_mod)
         module.block = nn.ModuleList(wrapped_block)
+        return module
 
 
 class FiDTensorizer:
@@ -502,6 +668,7 @@ class FiDTensorizer:
             answer + " </s>",
             max_length=self.answer_max_length,
         )
+        answer_ids = self.to_max_length(answer_ids, max_length=self.answer_max_length)
         return answer_ids
 
     def concatenate_answer_ids(self, answer_ids: Union[np.ndarray, T]) -> T:
@@ -530,6 +697,7 @@ class FiDTensorizer:
             concat_str,
             max_length=self.context_max_length,
         )
+        concat_ids = self.to_max_length(concat_ids, max_length=self.context_max_length)
         return concat_ids
 
     def concatenate_question_and_passage_ids_pair(

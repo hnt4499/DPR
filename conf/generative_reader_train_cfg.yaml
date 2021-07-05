@@ -5,10 +5,6 @@ defaults:
 
 # A trained reader checkpoint file to initialize the model
 model_file:
-
-# Whether to lower case the input text. Set True for uncased models, False for the cased ones.
-do_lower_case: True
-
 seed: 42
 
 
@@ -33,7 +29,7 @@ output_dir: checkpoints/
 checkpoint_file_name: dpr_generative_reader
 
 # Path to a file to write prediction results to
-prediction_results_file:
+prediction_results_file: predictions.json
 
 # Enables fully resumable mode
 fully_resumable: True
