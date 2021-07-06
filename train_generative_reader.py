@@ -294,7 +294,7 @@ class ReaderTrainer(object):
         f1s = np.mean(sum(f1s, []))
         logger.info(f"F1 {f1s * 100:.2f}")
 
-        if cfg.prediction_results_file:
+        if cfg.local_rank in [-1, 0] and cfg.prediction_results_file:
             self._save_predictions(
                 cfg.prediction_results_file,
                 all_questions,
