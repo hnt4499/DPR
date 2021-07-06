@@ -229,7 +229,7 @@ class ReaderTrainer(object):
             input = GenerativeReaderBatch(**move_to_device(input._asdict(), cfg.device))
             attn_mask = self.tensorizer.get_attn_mask(input.input_ids)
 
-            outputs = self.reader.generate(
+            outputs = reader_model.generate(
                 input_ids=input.input_ids,
                 attention_mask=attn_mask,
                 max_length=cfg.encoder.answer_max_length,
