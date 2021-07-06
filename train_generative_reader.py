@@ -200,7 +200,9 @@ class ReaderTrainer(object):
         logger.info("Validation ...")
         cfg = self.cfg
         self.reader.eval()
-        self.reader.set_num_passages(cfg.passages_per_question_predict)
+
+        reader_model: FiDT5 = get_model_obj(self.reader)
+        reader_model.set_num_passages(cfg.passages_per_question_predict)
 
         if self.dev_iterator is None:
             self.dev_iterator = self.get_data_iterator(
@@ -300,7 +302,7 @@ class ReaderTrainer(object):
                 all_predicted_answers,
             )
 
-        self.reader.set_num_passages(cfg.passages_per_question)
+        reader_model.set_num_passages(cfg.passages_per_question)
         return em
 
     def _train_epoch(
