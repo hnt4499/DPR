@@ -28,7 +28,13 @@ from torch import nn
 
 from dpr.models import init_biencoder_components, init_loss
 from dpr.data.data_types import BiEncoderBatch
-from dpr.models.biencoder import BiEncoder, Match_BiEncoder, MatchGated_BiEncoder, gather, calc_loss
+from dpr.models.biencoder_retrievers.biencoder import (
+    BiEncoder,
+    Match_BiEncoder,
+    MatchGated_BiEncoder,
+    gather,
+    calc_loss,
+)
 from dpr.options import (
     setup_cfg_gpu,
     set_seed,

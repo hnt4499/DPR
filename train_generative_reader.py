@@ -33,8 +33,8 @@ from dpr.data.reader_data import (
     GenerativeReaderGeneralDataset,
 )
 from dpr.models import init_generative_reader_components
-from dpr.models.fid_base import FiDT5
-from dpr.models.generative_reader import create_generative_reader_input
+from dpr.models.generative_readers.fid_base import FiDT5
+from dpr.models.generative_readers.generative_reader import create_generative_reader_input
 from dpr.options import (
     setup_cfg_gpu,
     set_seed,

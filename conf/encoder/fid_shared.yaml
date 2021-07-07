@@ -1,0 +1,19 @@
+# @package _group_
+
+# model type. One of [hf_bert, pytext_bert, fairseq_roberta]
+encoder_model_type: fid_shared
+
+# HuggingFace's config name for model initialization
+pretrained_model_cfg: t5-base
+
+# Some encoders need to be initialized from a file
+pretrained_file:
+
+# Max length of the encoder input sequence
+context_max_length: 256
+answer_max_length: 20
+
+dropout: 0.1
+
+# if False, the model won't load pre-trained BERT weights
+pretrained: True

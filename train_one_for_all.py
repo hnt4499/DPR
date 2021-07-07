@@ -29,9 +29,17 @@ import torch
 from omegaconf import DictConfig, OmegaConf
 import numpy as np
 
-from dpr.models import init_ofa_model, init_biencoder_components, init_reader_components, init_loss
-from dpr.utils.legacy_utils import load_states_from_checkpoint_legacy, convert_from_old_state_to_ofa
-from dpr.models.biencoder import BiEncoderNllLoss
+from dpr.models import (
+    init_ofa_model,
+    init_biencoder_components,
+    init_reader_components,
+    init_loss,
+)
+from dpr.utils.legacy_utils import (
+    load_states_from_checkpoint_legacy,
+    convert_from_old_state_to_ofa,
+)
+from dpr.models.biencoder_retrievers.biencoder import BiEncoderNllLoss
 from dpr.data.data_types import (
     BiEncoderBatch,
     BiEncoderDataConfig,
@@ -47,14 +55,18 @@ from dpr.data.data_types import (
 )
 from dpr.utils.conf_utils import OneForAllDatasetsCfg
 from dpr.data.general_data import GeneralDatasetScheme
-from dpr.data.biencoder_data import Dataset, DEFAULT_SELECTOR, RepStaticPosTokenSelector
+from dpr.data.biencoder_data import (
+    Dataset,
+    DEFAULT_SELECTOR,
+    RepStaticPosTokenSelector,
+)
 from dpr.utils.data_utils import (
     ShardedDataIterator,
     ShardedDataIteratorClustering,
     MultiSetDataIterator,
 )
-from dpr.models.one_for_all_base import create_ofa_input, SimpleOneForAllModel
-from dpr.models.hf_models_ofa_simple import do_ofa_fwd_pass as ofa_simple_fw_pass
+from dpr.models.ofa.one_for_all_base import create_ofa_input, SimpleOneForAllModel
+from dpr.models.ofa.hf_models_ofa_simple import do_ofa_fwd_pass as ofa_simple_fw_pass
 
 from dpr.options import (
     setup_cfg_gpu,
@@ -74,7 +86,9 @@ from dpr.utils.model_utils import (
     get_model_obj,
 )
 
-from dpr.models.reader import get_best_prediction as _get_best_prediction_reader
+from dpr.models.extractive_readers.extractive_reader import (
+    get_best_prediction as _get_best_prediction_reader
+)
 from dpr.data.qa_validation import exact_match_score, f1_score
 
 

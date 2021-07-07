@@ -34,7 +34,11 @@ from dpr.indexer.faiss_indexers import (
     DenseIndexer,
 )
 from dpr.models import init_biencoder_components
-from dpr.models.biencoder import BiEncoder, Match_BiEncoder, _select_span_with_token
+from dpr.models.biencoder_retrievers.biencoder import (
+    BiEncoder,
+    Match_BiEncoder,
+    _select_span_with_token,
+)
 from dpr.options import setup_logger, setup_cfg_gpu, set_cfg_params_from_state
 from dpr.utils.data_utils import Tensorizer
 from dpr.utils.model_utils import (

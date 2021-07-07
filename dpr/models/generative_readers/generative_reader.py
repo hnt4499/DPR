@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 
+import copy
 import inspect
 import logging
 import random
@@ -22,6 +23,10 @@ from transformers.modeling_t5 import (
     T5Config,
     T5Stack,
     T5Block,
+    T5LayerNorm,
+    T5LayerFF,
+    T5LayerSelfAttention,
+    T5LayerCrossAttention,
 )
 from transformers import T5Tokenizer
 
@@ -36,6 +41,93 @@ from ...data.data_types import (
 logger = logging.getLogger(__name__)
 
 
+class CustomT5Block(T5Block):
+    """
+    Custom T5 block that allows the use of pre-initialized T5 layers.
+    """
+    def __init__(
+        self,
+        config,
+        has_relative_attention_bias: bool = False,
+        layers: nn.ModuleList = None,
+    ):
+        super(T5Block, self).__init__()  # note that call stack
+        self.config = config
+        self.is_decoder = config.is_decoder
+        self.has_relative_attention_bias = has_relative_attention_bias
+
+        if layers is None:
+            self.layer = nn.ModuleList()
+            self.layer.append(T5LayerSelfAttention(
+                config,
+                has_relative_attention_bias=has_relative_attention_bias
+            ))
+            if self.is_decoder:
+                self.layer.append(T5LayerCrossAttention(
+                    config,
+                    has_relative_attention_bias=has_relative_attention_bias
+                ))
+
+            self.layer.append(T5LayerFF(config))
+        else:
+            self.layer = layers
+
+    def to_encoder(self):
+        """
+        Return a new object that shares parameters with the current object,
+        and with the cross attention layer removed. This function should
+        only be called from a T5 block of a decoder (NOT encoder).
+        """
+        assert self.is_decoder, (
+            "This function must be called from a block of a decoder"
+        )
+
+        layers = nn.ModuleList([
+            self.layer[0],
+            self.layer[2],
+        ])  # remove the second layer
+        config = copy.deepcopy(self.config)
+        config.is_decoder = False
+
+        return CustomT5Block(
+            config,
+            self.has_relative_attention_bias,
+            layers=layers,
+        )
+
+
+class CustomT5Stack(T5Stack):
+    """
+    Custom T5 stack that allows the use of pre-initialized T5Blocks.
+    """
+    def __init__(
+        self,
+        config,
+        embed_tokens: nn.Embedding = None,
+        block: nn.ModuleList = None,
+    ):
+        super(T5Stack, self).__init__(config)  # note the call stack
+
+        self.embed_tokens = embed_tokens
+        self.is_decoder = config.is_decoder
+
+        if block is None:
+            self.block = nn.ModuleList(
+                [CustomT5Block(config, has_relative_attention_bias=bool(i == 0))
+                 for i in range(config.num_layers)]
+            )
+        else:
+            self.block = block
+
+        self.final_layer_norm = T5LayerNorm(  # we don't need to share this layer
+            config.d_model,
+            eps=config.layer_norm_epsilon,
+        )
+        self.dropout = nn.Dropout(config.dropout_rate)
+
+        self.init_weights()
+
+
 class FiDT5(T5ForConditionalGeneration):
     def __init__(
         self,
@@ -43,11 +135,52 @@ class FiDT5(T5ForConditionalGeneration):
         num_passages: int,
         device: str,
         gradient_checkpointing: bool = True,
+        share_encoder_decoder: bool = False,
     ):
-        super(FiDT5, self).__init__(config)
+        super(T5ForConditionalGeneration, self).__init__(config)  # note that call stack
+        self.model_dim = config.d_model
         self.num_passages = num_passages
         self._device = device
         self.gradient_checkpointing = gradient_checkpointing
+        self.share_encoder_decoder = share_encoder_decoder
+
+        # Embedding look up
+        self.shared = nn.Embedding(config.vocab_size, config.d_model)
+
+        # Initialize the decoder first as it has more layers
+        decoder_config = copy.deepcopy(config)
+        decoder_config.is_decoder = True
+        self.decoder = CustomT5Stack(decoder_config, self.shared, block=None)
+
+        # Initialize the encoder, with the option of parameter sharing
+        if share_encoder_decoder:
+            logger.info(
+                f"[{self.__class__.__name__}] Sharing the weights of encoder "
+                f"and decoder architectures"
+            )
+            block = self.decoder.block
+
+            # Need to convert this block to be compatible with encoder module
+            new_block = nn.ModuleList()
+            for block_i in block:
+                block_i: CustomT5Block
+                block_i = block_i.to_encoder()
+                new_block.append(block_i)
+            block = new_block
+
+        else:
+            logger.info(
+                f"[{self.__class__.__name__}] Weights of the encoder and decoder "
+                f"are not shared!"
+            )
+            block = None
+
+        encoder_config = copy.deepcopy(config)
+        encoder_config.use_cache = False
+        self.encoder = CustomT5Stack(encoder_config, self.shared, block=block)
+
+        self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
+        self.init_weights()
 
     @classmethod
     def init_model(
@@ -58,6 +191,7 @@ class FiDT5(T5ForConditionalGeneration):
         dropout: float = 0.1,
         pretrained: bool = True,
         gradient_checkpointing: bool = True,
+        share_encoder_decoder: bool = False,
         **kwargs,
     ) -> T5Model:
         """
@@ -70,6 +204,9 @@ class FiDT5(T5ForConditionalGeneration):
             each example.
         gradient_checkpointing : bool
             Whether to enable gradient checkpointing.
+        share_encoder_decoder : bool
+            Whether to share the weights of the encoder and decoder components
+            of the underlying T5 model.
         """
         cfg = T5Config.from_pretrained(cfg_name, **kwargs)
         if dropout != 0:
@@ -83,6 +220,7 @@ class FiDT5(T5ForConditionalGeneration):
                 num_passages=num_passages,
                 device=device,
                 gradient_checkpointing=gradient_checkpointing,
+                share_encoder_decoder=share_encoder_decoder,
             )
         else:
             model = cls(
@@ -90,6 +228,7 @@ class FiDT5(T5ForConditionalGeneration):
                 num_passages=num_passages,
                 device=device,
                 gradient_checkpointing=gradient_checkpointing,
+                share_encoder_decoder=share_encoder_decoder,
             )
 
         # Wrap after initialized
@@ -248,15 +387,15 @@ def _flatten(inputs, flattened_inputs: list, structure: list, only_tensor: bool)
 def flatten(inputs, only_tensor: bool):
     """"
     Recursively traverse the inputs and flatten it into a list of tensors.
-    Also returns a list of structed objects that helps to recover the
+    Also returns a list of structured objects that helps to recover the
     original inputs.
 
     Parameters
     ----------
     inputs
         Input to flatten. Recursively speaking, sub-object of this
-        `inputs` (including `inputs` itself) must be either a None,
-        a tensor or a tuple/list of these types.
+        `inputs` (including `inputs` itself) should be either a None,
+        a tensor or a tuple/list of these types. See `only_tensor`.
     only_tensor : bool
         If True, recursively check if every "leaf" object is either None
         or a torch tensor. Raise an error if an object of another type
@@ -265,7 +404,7 @@ def flatten(inputs, only_tensor: bool):
 
     Returns
     -------
-        A tuple of (flattened_inputs, structure), where the structure
+        A tuple of (flattened_inputs, structure), where the `structure`
         object could be used to recover the original structured inputs.
     """
     flattened_inputs = []
@@ -370,7 +509,7 @@ def is_tensor(object):
     """
     Recursively check whether the input object is a tensor or a tuple / list of tensor.
     Note that if one of the (sub-)objects is a tuple / list containing some tensors and
-    some non-tensors, this function will return False, considering that object as
+    some non-tensors, this function will return False, considering that object as a
     non-tensor object.
     """
     if isinstance(object, T):
@@ -447,7 +586,7 @@ class CheckpointWrapper(nn.Module):
     """
     def __init__(
         self,
-        module: T5Block,
+        module: CustomT5Block,
         device: str,
         gradient_checkpointing: bool = True,
     ):
