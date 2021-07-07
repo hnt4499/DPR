@@ -25,8 +25,8 @@ from transformers.modeling_t5 import (
 )
 from transformers import T5Tokenizer
 
-from ..data.general_data import TokenizedWikipediaPassages
-from ..data.data_types import (
+from ...data.general_data import TokenizedWikipediaPassages
+from ...data.data_types import (
     GenerativeReaderPassage,
     GenerativeReaderSample,
     GenerativeReaderBatch,

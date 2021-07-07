@@ -27,7 +27,12 @@ from dpr.data.data_types import (
     DataSample,
     ReaderSample,
 )
-from dpr.data.general_data import TokenizedWikipediaPassages, GeneralDataset, GeneralDatasetScheme, _find_answer_positions
+from dpr.data.general_data import (
+    TokenizedWikipediaPassages,
+    GeneralDataset,
+    GeneralDatasetScheme,
+    _find_answer_positions,
+)
 
 logger = logging.getLogger(__name__)
 

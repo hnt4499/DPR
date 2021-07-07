@@ -3,9 +3,12 @@ from typing import Tuple, List, Union
 import torch
 from torch import Tensor as T
 
-from dpr.models.biencoder import BiEncoder
-from dpr.models.reader import Reader
-from dpr.models.one_for_all_base import SimpleOneForAllModel, create_biencoder_input_from_reader_input
+from dpr.models.biencoder_retrievers.biencoder import BiEncoder
+from dpr.models.extractive_readers.extractive_reader import Reader
+from dpr.models.ofa.one_for_all_base import (
+    SimpleOneForAllModel,
+    create_biencoder_input_from_reader_input,
+)
 from dpr.models.hf_models import get_optimizer, HFBertEncoder
 from dpr.models.hf_models_single_model import get_bert_tensorizer
 from dpr.data.data_types import (
@@ -17,8 +20,8 @@ from dpr.data.data_types import (
     ReaderPredictionBatch,
     ForwardPassOutputsTrain,
 )
-from dpr.models.biencoder import calc_loss as calc_loss_biencoder
-from dpr.models.reader import compute_loss as calc_loss_reader
+from dpr.models.biencoder_retrievers.biencoder import calc_loss as calc_loss_biencoder
+from dpr.models.extractive_readers.extractive_reader import compute_loss as calc_loss_reader
 from dpr.utils.model_utils import move_to_device
 
 

@@ -13,8 +13,10 @@ encoding both question and context, with several layers on top of the encoder
 
 import logging
 
-from dpr.models.biencoder import MatchGated_BiEncoder
-from .hf_models_single_model_match import get_optimizer, get_bert_tensorizer, HFBertEncoder
+from .biencoder import Match_BiEncoder
+from ..hf_models_single_model import get_optimizer, get_bert_tensorizer
+from ..hf_models_single_model import HFBertEncoder as HFBertEncoderOrig
+
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +33,7 @@ def get_bert_biencoder_components(cfg, inference_only: bool = False, **kwargs):
 
     fix_ctx_encoder = cfg.fix_ctx_encoder if hasattr(cfg, "fix_ctx_encoder") else False
 
-    biencoder = MatchGated_BiEncoder(
+    biencoder = Match_BiEncoder(
         question_encoder, ctx_encoder, fix_ctx_encoder=fix_ctx_encoder, freeze_encoders=cfg.encoder.freeze_encoders,
     )
 
@@ -49,3 +51,9 @@ def get_bert_biencoder_components(cfg, inference_only: bool = False, **kwargs):
 
     tensorizer = get_bert_tensorizer(cfg, biencoder)
     return tensorizer, biencoder, optimizer
+
+
+class HFBertEncoder(HFBertEncoderOrig):
+    def __init__(self, config, project_dim: int = 0):
+        super(HFBertEncoder, self).__init__(config, project_dim)
+        self.out_features = project_dim if project_dim != 0 else config.hidden_size

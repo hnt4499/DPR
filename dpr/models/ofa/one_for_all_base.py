@@ -26,8 +26,8 @@ from dpr.data.data_types import (
     ReaderTrainingConfig,
 )
 from dpr.utils.data_utils import Tensorizer
-from dpr.models.biencoder import BiEncoder
-from dpr.models.reader import Reader, create_reader_input
+from dpr.models.biencoder_retrievers.biencoder import BiEncoder
+from dpr.models.extractive_readers.extractive_reader import Reader, create_reader_input
 from dpr.utils.model_utils import CheckpointStateOFA, load_state_dict_to_model
 
 

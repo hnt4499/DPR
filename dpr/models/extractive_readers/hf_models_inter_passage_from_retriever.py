@@ -18,7 +18,7 @@ from transformers.optimization import AdamW
 
 from dpr.utils.model_utils import load_states_from_checkpoint
 from .hf_models_inter_passage import HFBertEncoderWithNumLayers, get_bert_tensorizer
-from .reader import InterPassageReader
+from .extractive_reader import InterPassageReader
 
 logger = logging.getLogger(__name__)
 
@@ -36,19 +36,19 @@ def get_bert_reader_components(cfg, inference_only: bool = False, **kwargs):
         num_hidden_layers=num_layers[0],
         **kwargs
     )
-    
+
     # Load state dict for the main encoder
     if cfg.encoder.pretrained_encoder_file is not None:
         assert cfg.encoder.pretrained_file is None, "Ambiguous pretrained model"
         assert cfg.encoder.encoder_initialize_from in ["question_encoder", "ctx_encoder"]
         saved_state = load_states_from_checkpoint(cfg.encoder.pretrained_encoder_file).model_dict
         key_start = "question_model" if cfg.encoder.encoder_initialize_from == "question_encoder" else "ctx_model"
-        
+
         new_saved_state = {}
         for key, param in saved_state.items():
             if not key.startswith(key_start):
                 continue
-            
+
             # Remove "xxx_model." part
             key = ".".join(key.split(".")[1:])
 
@@ -63,7 +63,7 @@ def get_bert_reader_components(cfg, inference_only: bool = False, **kwargs):
                     logger.info(f"Truncating pretrained embedding ('{key}') size from {len(param)} to {len(model_embeddings)} "
                                 f"by simply selecting the first {len(model_embeddings)} embeddings.")
                     param = param[:len(model_embeddings)]
-            
+
             new_saved_state[key] = param
 
         # Load to the model
@@ -73,7 +73,7 @@ def get_bert_reader_components(cfg, inference_only: bool = False, **kwargs):
         if cfg.encoder.encoder_freeze:
             for _, param in encoder.named_parameters():
                 param.requires_grad = False
-    
+
     elif cfg.encoder.encoder_freeze:
         raise ValueError("You should not freeze a model that is not trained on a QA task.")
 
@@ -144,7 +144,7 @@ def get_optimizer(
             key_decay = "with_decay"
         else:
             key_decay = "without_decay"
-        
+
         all_groups[key_lr][key_decay]["params"].append(parameter)
 
     optimizer_grouped_parameters = [

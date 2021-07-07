@@ -16,9 +16,10 @@ from typing import List, Union
 import torch.nn as nn
 from transformers import BertModel
 
-from dpr.models.biencoder import BiEncoder
-from dpr.models.hf_models import get_optimizer, HFBertEncoder
-from dpr.models.hf_models_single_model import get_bert_tensorizer
+from .biencoder import BiEncoder
+from ..hf_models import get_optimizer, HFBertEncoder
+from ..hf_models_single_model import get_bert_tensorizer
+
 
 logger = logging.getLogger(__name__)
 

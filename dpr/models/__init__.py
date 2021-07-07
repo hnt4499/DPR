@@ -41,28 +41,28 @@ def init_hf_bert_biencoder_single_model(args, **kwargs):
 def init_hf_bert_biencoder_single_model_match(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_single_model_match import get_bert_biencoder_components
+    from .biencoder_retrievers.hf_models_single_model_match import get_bert_biencoder_components
     return get_bert_biencoder_components(args, **kwargs)
 
 
 def init_hf_bert_biencoder_single_model_match_gated(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_single_model_match_gated import get_bert_biencoder_components
+    from .biencoder_retrievers.hf_models_single_model_match_gated import get_bert_biencoder_components
     return get_bert_biencoder_components(args, **kwargs)
 
 
 def init_hf_bert_biencoder_single_model_with_projector(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_single_model_with_projector import get_bert_biencoder_components
+    from .biencoder_retrievers.hf_models_single_model_with_projector import get_bert_biencoder_components
     return get_bert_biencoder_components(args, **kwargs)
 
 
 def init_hf_bert_biencoder_single_model_barlow_twins(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_single_model_barlow_twins import get_bert_biencoder_components
+    from .biencoder_retrievers.hf_models_single_model_barlow_twins import get_bert_biencoder_components
     return get_bert_biencoder_components(args, **kwargs)
 
 
@@ -119,21 +119,21 @@ def init_hf_bert_reader(args, **kwargs):
 def init_hf_bert_inter_passage_reader(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_inter_passage import get_bert_reader_components
+    from .extractive_readers.hf_models_inter_passage import get_bert_reader_components
     return get_bert_reader_components(args, **kwargs)
 
 
 def init_hf_bert_inter_passage_reader_from_retriever(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_inter_passage_from_retriever import get_bert_reader_components
+    from .extractive_readers.hf_models_inter_passage_from_retriever import get_bert_reader_components
     return get_bert_reader_components(args, **kwargs)
 
 
 def init_hf_bert_inter_passage_reader_v2(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_inter_passage_v2 import get_bert_reader_components
+    from .extractive_readers.hf_models_inter_passage_v2 import get_bert_reader_components
     return get_bert_reader_components(args, **kwargs)
 
 
@@ -153,20 +153,20 @@ def init_reader_components(encoder_type: str, args, **kwargs):
 def init_hf_bert_ofa_simple(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_ofa_simple import get_bert_one_for_all_components
+    from .ofa.hf_models_ofa_simple import get_bert_one_for_all_components
     return get_bert_one_for_all_components(args, **kwargs)
 
 
 def init_hf_bert_ofa_with_passage_scores(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_ofa_with_passage_scores import get_bert_one_for_all_components
+    from .ofa.hf_models_ofa_with_passage_scores import get_bert_one_for_all_components
     return get_bert_one_for_all_components(args, **kwargs)
 
 def init_hf_bert_ofa_special_tokens(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_ofa_special_tokens import get_bert_one_for_all_components
+    from .ofa.hf_models_ofa_special_tokens import get_bert_one_for_all_components
     return get_bert_one_for_all_components(args, **kwargs)
 
 
@@ -188,7 +188,7 @@ def init_ofa_model(encoder_type: str, args, **kwargs):
 def init_fid_base_generative_reader(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .fid_base import get_generative_reader_components
+    from .generative_readers.fid_base import get_generative_reader_components
     return get_generative_reader_components(args, **kwargs)
 
 
@@ -220,28 +220,28 @@ def init_hf_bert_tenzorizer_single_model(args, **kwargs):
 def init_hf_bert_tenzorizer_single_model_match(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_single_model_match import get_bert_tensorizer
+    from .biencoder_retrievers.hf_models_single_model_match import get_bert_tensorizer
     return get_bert_tensorizer(args)
 
 
 def init_hf_bert_tenzorizer_single_model_match_gated(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_single_model_match_gated import get_bert_tensorizer
+    from .biencoder_retrievers.hf_models_single_model_match_gated import get_bert_tensorizer
     return get_bert_tensorizer(args)
 
 
 def init_hf_bert_tenzorizer_single_model_with_projector(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_single_model_with_projector import get_bert_tensorizer
+    from .biencoder_retrievers.hf_models_single_model_with_projector import get_bert_tensorizer
     return get_bert_tensorizer(args)
 
 
 def init_hf_bert_tenzorizer_single_model_barlow_twins(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_single_model_barlow_twins import get_bert_tensorizer
+    from .biencoder_retrievers.hf_models_single_model_barlow_twins import get_bert_tensorizer
     return get_bert_tensorizer(args)
 
 
@@ -255,21 +255,21 @@ def init_hf_bert_tenzorizer_single_model_score_scaling(args, **kwargs):
 def init_hf_bert_ofa_simple_tensorizer(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_ofa_simple import get_bert_tensorizer
+    from .ofa.hf_models_ofa_simple import get_bert_tensorizer
     return get_bert_tensorizer(args)
 
 
 def init_hf_bert_ofa_with_passage_scores_tensorizer(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_ofa_with_passage_scores import get_bert_tensorizer
+    from .ofa.hf_models_ofa_with_passage_scores import get_bert_tensorizer
     return get_bert_tensorizer(args)
 
 
 def init_hf_bert_ofa_special_tokens_tensorizer(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .hf_models_ofa_special_tokens import get_bert_tensorizer
+    from .ofa.hf_models_ofa_special_tokens import get_bert_tensorizer
     return get_bert_tensorizer(args)
 
 
@@ -284,7 +284,7 @@ def init_hf_roberta_tenzorizer(args, **kwargs):
 def init_fid_base_tensorizer(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .fid_base import get_generative_tensorizer
+    from .generative_readers.fid_base import get_generative_tensorizer
     return get_generative_tensorizer(args)
 
 
@@ -322,77 +322,77 @@ def init_tenzorizer(encoder_type: str, args, **kwargs):
 def init_hf_bert_loss(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .biencoder import BiEncoderNllLoss
+    from .biencoder_retrievers.biencoder import BiEncoderNllLoss
     return BiEncoderNllLoss(args)
 
 
 def init_hf_bert_loss_single_model(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .biencoder import BiEncoderNllLoss
+    from .biencoder_retrievers.biencoder import BiEncoderNllLoss
     return BiEncoderNllLoss(args)
 
 
 def init_hf_bert_loss_single_model_match(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .biencoder import Match_BiEncoderNllLoss
+    from .biencoder_retrievers.biencoder import Match_BiEncoderNllLoss
     return Match_BiEncoderNllLoss(args)
 
 
 def init_hf_bert_loss_single_model_match_gated(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .biencoder import MatchGated_BiEncoderNllLoss
+    from .biencoder_retrievers.biencoder import MatchGated_BiEncoderNllLoss
     return MatchGated_BiEncoderNllLoss(args)
 
 
 def init_hf_bert_loss_single_model_with_projector(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .biencoder import BiEncoderNllLoss
+    from .biencoder_retrievers.biencoder import BiEncoderNllLoss
     return BiEncoderNllLoss(args)
 
 
 def init_hf_bert_loss_single_model_barlow_twins(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .biencoder import BiEncoderBarlowTwinsLoss
+    from .biencoder_retrievers.biencoder import BiEncoderBarlowTwinsLoss
     return BiEncoderBarlowTwinsLoss(args)
 
 
 def init_hf_bert_loss_single_model_score_scaling(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .biencoder import BiEncoderNllLoss
+    from .biencoder_retrievers.biencoder import BiEncoderNllLoss
     return BiEncoderNllLoss(args, score_scaling=True)
 
 
 def init_hf_bert_loss_ofa_simple(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .biencoder import BiEncoderNllLoss
+    from .biencoder_retrievers.biencoder import BiEncoderNllLoss
     return BiEncoderNllLoss(args)
 
 
 def init_hf_bert_loss_ofa_with_passage_scores(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .biencoder import BiEncoderNllLoss
+    from .biencoder_retrievers.biencoder import BiEncoderNllLoss
     return BiEncoderNllLoss(args)
 
 
 def init_hf_bert_loss_ofa_special_tokens(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .biencoder import BiEncoderNllLoss
+    from .biencoder_retrievers.biencoder import BiEncoderNllLoss
     return BiEncoderNllLoss(args)
 
 
 def init_hf_roberta_loss(args, **kwargs):
     if importlib.util.find_spec("transformers") is None:
         raise RuntimeError('Please install transformers lib')
-    from .biencoder import BiEncoderNllLoss
+    from .biencoder_retrievers.biencoder import BiEncoderNllLoss
     return BiEncoderNllLoss(args)
 
 

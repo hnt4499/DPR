@@ -18,7 +18,7 @@ from torch import Tensor as T
 import numpy as np
 from transformers.tokenization_bert import BertTokenizer
 
-from dpr.models.biencoder import BiEncoder
+from dpr.models.biencoder_retrievers.biencoder import BiEncoder
 from dpr.models.hf_models import _add_special_tokens, get_optimizer, HFBertEncoder
 from dpr.models.hf_models import BertTensorizer as Tensorizer
 

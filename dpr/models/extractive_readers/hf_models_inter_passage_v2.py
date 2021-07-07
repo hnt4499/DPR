@@ -11,10 +11,10 @@ Reader model with inter-passage modeling.
 
 import logging
 
-from transformers.modeling_bert import BertModel, BertConfig
 
-from.hf_models import HFBertEncoder, get_optimizer, get_bert_tensorizer
-from .reader import InterPassageReader
+from .hf_models_inter_passage import get_optimizer, get_bert_tensorizer, HFBertEncoderWithNumLayers
+from .extractive_reader import InterPassageReaderV2
+
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 def get_bert_reader_components(cfg, inference_only: bool = False, **kwargs):
     dropout = cfg.encoder.dropout if hasattr(cfg.encoder, "dropout") else 0.0
     num_layers = cfg.encoder.num_layers
-    logger.info(f"Initializing InterPassageReader with number of layers for two components: {num_layers}.")
+    logger.info(f"Initializing InterPassageReaderV2 with number of layers for two components: {num_layers}.")
 
     encoder = HFBertEncoderWithNumLayers.init_encoder(
         cfg.encoder.pretrained_model_cfg,
@@ -42,7 +42,8 @@ def get_bert_reader_components(cfg, inference_only: bool = False, **kwargs):
         **kwargs
     )
 
-    reader = InterPassageReader(encoder, inter_passage_encoder, hidden_size=None)
+    reader = InterPassageReaderV2(
+        encoder, inter_passage_encoder, bottleneck_size=cfg.encoder.bottleneck_size, hidden_size=None)
 
     optimizer = (
         get_optimizer(
@@ -57,28 +58,3 @@ def get_bert_reader_components(cfg, inference_only: bool = False, **kwargs):
 
     tensorizer = get_bert_tensorizer(cfg)
     return tensorizer, reader, optimizer
-
-
-class HFBertEncoderWithNumLayers(HFBertEncoder):
-    @classmethod
-    def init_encoder(
-        cls,
-        cfg_name: str,
-        num_hidden_layers: int,
-        projection_dim: int = 0,
-        dropout: float = 0.1,
-        pretrained: bool = True,
-        **kwargs
-    ) -> BertModel:
-        cfg = BertConfig.from_pretrained(cfg_name if cfg_name else "bert-base-uncased", 
-                                         num_hidden_layers=num_hidden_layers, **kwargs)
-        if dropout != 0:
-            cfg.attention_probs_dropout_prob = dropout
-            cfg.hidden_dropout_prob = dropout
-
-        if pretrained:
-            return cls.from_pretrained(
-                cfg_name, config=cfg, project_dim=projection_dim,
-            )
-        else:
-            return cls(cfg, project_dim=projection_dim)

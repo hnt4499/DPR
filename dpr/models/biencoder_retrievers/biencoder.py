@@ -806,7 +806,7 @@ def _select_span_with_token(
             if query_tensor[0] != cls_id:
                 query_tensor = torch.cat([torch.tensor([cls_id]), query_tensor], dim=0)
 
-            from dpr.models.reader import pad_to_len
+            from dpr.models.extractive_readers.extractive_reader import pad_to_len
 
             query_tensor = pad_to_len(
                 query_tensor, tensorizer.get_pad_id(), tensorizer.max_length

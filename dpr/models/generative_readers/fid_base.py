@@ -1,5 +1,5 @@
 from .generative_reader import FiDT5, FiDTensorizer
-from .hf_models import get_optimizer
+from ..hf_models import get_optimizer
 
 
 def get_generative_reader_components(

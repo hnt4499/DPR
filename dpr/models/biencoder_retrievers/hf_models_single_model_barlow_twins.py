@@ -6,17 +6,14 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Encoder model wrappers based on HuggingFace code using only one model for
-encoding both question and context, with several layers on top of the encoder
-; second stage: feed-forward, interactive matching)
+Both question encoder and context encoder share the same base BERT encoder, with separate
+projector head on top of it.
 """
-
 import logging
 
-from dpr.models.biencoder import Match_BiEncoder
-from .hf_models_single_model import get_optimizer, get_bert_tensorizer
-from .hf_models_single_model import HFBertEncoder as HFBertEncoderOrig
-
+from .biencoder import BiEncoderBarlowTwins
+from ..hf_models import get_optimizer, HFBertEncoder
+from ..hf_models_single_model import get_bert_tensorizer
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +30,9 @@ def get_bert_biencoder_components(cfg, inference_only: bool = False, **kwargs):
 
     fix_ctx_encoder = cfg.fix_ctx_encoder if hasattr(cfg, "fix_ctx_encoder") else False
 
-    biencoder = Match_BiEncoder(
-        question_encoder, ctx_encoder, fix_ctx_encoder=fix_ctx_encoder, freeze_encoders=cfg.encoder.freeze_encoders,
-    )
+    biencoder = BiEncoderBarlowTwins(
+        question_encoder, ctx_encoder, fix_ctx_encoder=fix_ctx_encoder
+    ).to(cfg.device)
 
     optimizer = (
         get_optimizer(
@@ -51,9 +48,3 @@ def get_bert_biencoder_components(cfg, inference_only: bool = False, **kwargs):
 
     tensorizer = get_bert_tensorizer(cfg, biencoder)
     return tensorizer, biencoder, optimizer
-
-
-class HFBertEncoder(HFBertEncoderOrig):
-    def __init__(self, config, project_dim: int = 0):
-        super(HFBertEncoder, self).__init__(config, project_dim)
-        self.out_features = project_dim if project_dim != 0 else config.hidden_size

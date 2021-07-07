@@ -6,15 +6,15 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-Both question encoder and context encoder share the same base BERT encoder, with separate
-projector head on top of it.
+Encoder model wrappers based on HuggingFace code using only one model for
+encoding both question and context, with several layers on top of the encoder
+; second stage: feed-forward, interactive matching)
 """
+
 import logging
 
-from dpr.models.biencoder import BiEncoderBarlowTwins
-from dpr.models.hf_models import get_optimizer, HFBertEncoder
-from dpr.models.hf_models_single_model import get_bert_tensorizer
-from dpr.models.hf_models_single_model_with_projector import BERTWithProjector
+from .biencoder import MatchGated_BiEncoder
+from .hf_models_single_model_match import get_optimizer, get_bert_tensorizer, HFBertEncoder
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +31,9 @@ def get_bert_biencoder_components(cfg, inference_only: bool = False, **kwargs):
 
     fix_ctx_encoder = cfg.fix_ctx_encoder if hasattr(cfg, "fix_ctx_encoder") else False
 
-    biencoder = BiEncoderBarlowTwins(
-        question_encoder, ctx_encoder, fix_ctx_encoder=fix_ctx_encoder
-    ).to(cfg.device)
+    biencoder = MatchGated_BiEncoder(
+        question_encoder, ctx_encoder, fix_ctx_encoder=fix_ctx_encoder, freeze_encoders=cfg.encoder.freeze_encoders,
+    )
 
     optimizer = (
         get_optimizer(

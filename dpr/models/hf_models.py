@@ -22,10 +22,10 @@ from transformers.optimization import AdamW
 from transformers.tokenization_bert import BertTokenizer
 from transformers.tokenization_roberta import RobertaTokenizer
 
-from dpr.models.biencoder import BiEncoder
+from dpr.models.biencoder_retrievers.biencoder import BiEncoder
 from dpr.utils.data_utils import Tensorizer
 from dpr.utils.model_utils import load_state_dict_to_model
-from .reader import Reader
+from dpr.models.extractive_readers.extractive_reader import Reader
 
 logger = logging.getLogger(__name__)
 

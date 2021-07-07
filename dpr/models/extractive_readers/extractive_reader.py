@@ -10,7 +10,7 @@ The reader model code + its utilities (loss computation and input batch tensor g
 """
 
 import logging
-from typing import List, Tuple
+from typing import List
 
 import numpy as np
 import torch
@@ -24,7 +24,7 @@ from dpr.data.general_data import TokenizedWikipediaPassages
 from dpr.data.data_types import ReaderSample, ReaderPassage, ReaderBatch, ReaderQuestionPredictions, SpanPrediction
 from dpr.utils.model_utils import init_weights, CheckpointState, load_state_dict_to_model
 from dpr.utils.data_utils import Tensorizer
-from dpr.utils.dist_utils import all_gather_list
+
 
 logger = logging.getLogger()
 

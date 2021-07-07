@@ -18,7 +18,7 @@ from pytext.optimizer.optimizers import AdamW
 from torch import Tensor as T
 from torch import nn
 
-from .biencoder import BiEncoder
+from .biencoder_retrievers.biencoder import BiEncoder
 
 logger = logging.getLogger(__name__)
 
