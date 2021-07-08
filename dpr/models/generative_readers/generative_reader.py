@@ -30,6 +30,7 @@ from transformers.modeling_t5 import (
 )
 from transformers import T5Tokenizer
 
+from ...utils.model_utils import load_state_dict_to_model
 from ...data.general_data import TokenizedWikipediaPassages
 from ...data.data_types import (
     GenerativeReaderPassage,
@@ -302,6 +303,9 @@ class FiDT5(T5ForConditionalGeneration):
             attention_mask=attention_mask.view(attention_mask.size(0), -1),
             max_length=max_length,
         )
+
+    def load_state(self, state_dict):
+        load_state_dict_to_model(self, state_dict)
 
 
 class FiDT5Encoder(nn.Module):

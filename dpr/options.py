@@ -43,7 +43,7 @@ def set_cfg_params_from_state(state: dict, cfg: DictConfig):
             cfg.encoder.encoder_model_type = state["encoder_model_type"]
 
 
-def set_extractive_reader_cfg_params_from_state(state: dict, cfg: DictConfig):
+def set_generative_reader_cfg_params_from_state(state: dict, cfg: DictConfig):
     """
     Overrides some of the encoder config parameters from a give state object
     """

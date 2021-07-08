@@ -39,12 +39,14 @@ from dpr.options import (
     setup_cfg_gpu,
     set_seed,
     get_generative_reader_params_state_from_cfg,
+    set_generative_reader_cfg_params_from_state,
     setup_logger,
     get_gpu_info,
 )
 from dpr.utils.data_utils import ShardedDataIterator
 from dpr.utils.model_utils import (
     get_schedule_linear,
+    load_states_from_checkpoint,
     move_to_device,
     CheckpointState,
     get_model_file,
@@ -68,10 +70,11 @@ class ReaderTrainer(object):
         logger.info("***** Initializing components for training *****")
 
         model_file = get_model_file(self.cfg, self.cfg.checkpoint_file_name)
-        if model_file is not None:
-            raise NotImplementedError(
-                f"Resume has not been implemented for generative reader"
-            )
+        if model_file is None:
+            saved_state = None
+        else:
+            saved_state = load_states_from_checkpoint(model_file)
+            set_generative_reader_cfg_params_from_state(saved_state.encoder_params, cfg)
 
         gradient_checkpointing = self.cfg.gradient_checkpointing
         tensorizer, reader, optimizer = init_generative_reader_components(
@@ -95,6 +98,8 @@ class ReaderTrainer(object):
         self.reader: FiDT5 = reader
         self.optimizer = optimizer
         self.tensorizer = tensorizer
+        self._load_saved_state(saved_state)
+
         self.debugging = self.cfg.debugging
         self.wiki_data = None
         self.dev_iterator = None
@@ -102,6 +107,32 @@ class ReaderTrainer(object):
         self.start_batch = 0
         self.best_validation_result = None
         self.best_cp_name = None
+
+    def _load_saved_state(self, saved_state: CheckpointState):
+        if saved_state is None:
+            self.scheduler_state = None
+            return
+
+        epoch = saved_state.epoch
+        offset = saved_state.offset
+        if offset == 0:  # epoch has been completed
+            epoch += 1
+        logger.info(
+            f"Loading checkpoint @ epoch={epoch} and local iteration={offset}"
+        )
+        self.start_epoch = epoch
+        self.start_batch = offset
+
+        model_to_load: FiDT5 = get_model_obj(self.reader)
+        if saved_state.model_dict:
+            logger.info("Loading model weights from saved state ...")
+            model_to_load.load_state(saved_state.model_dict)
+
+        if saved_state.optimizer_dict:
+            logger.info("Loading saved optimizer state ...")
+            self.optimizer.load_state_dict(saved_state.optimizer_dict)
+        self.scheduler_state = saved_state.scheduler_dict
+
 
     def get_data_iterator(
         self,
@@ -159,7 +190,22 @@ class ReaderTrainer(object):
 
         warmup_steps = cfg.train.warmup_steps
 
-        scheduler = get_schedule_linear(self.optimizer, warmup_steps, total_updates)
+        # Model state is loaded from a checkpoint
+        if self.scheduler_state:
+            shift = int(self.scheduler_state["last_epoch"])
+            logger.info(
+                f"Loading scheduler state {self.scheduler_state} with step "
+                f"shift={shift}"
+            )
+            scheduler = get_schedule_linear(
+                self.optimizer,
+                warmup_steps,
+                total_updates,
+                steps_shift=shift,
+            )
+        # New model
+        else:
+            scheduler = get_schedule_linear(self.optimizer, warmup_steps, total_updates)
 
         eval_step = cfg.train.eval_step
         logger.info("  Eval step = %d", eval_step)
