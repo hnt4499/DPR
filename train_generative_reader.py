@@ -103,14 +103,14 @@ class ReaderTrainer(object):
         self.debugging = self.cfg.debugging
         self.wiki_data = None
         self.dev_iterator = None
-        self.start_epoch = 0
-        self.start_batch = 0
         self.best_validation_result = None
         self.best_cp_name = None
 
     def _load_saved_state(self, saved_state: CheckpointState):
         if saved_state is None:
             self.scheduler_state = None
+            self.start_epoch = 0
+            self.start_batch = 0
             return
 
         epoch = saved_state.epoch
