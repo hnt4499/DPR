@@ -191,6 +191,100 @@ class LocalFaissRetriever(DenseRetriever):
         return results
 
 
+class LocalLowMemoryFaissRetriever(LocalFaissRetriever):
+    """
+    Does passage retrieving over the provided index and question encoder.
+    This implementation does searching in document indices one by one,
+    then aggreagating the results, therefore lowering memory footprint.
+    """
+    def __init__(self, cfg, vector_size: int, *args, **kwargs):
+        super().__init__(*args, *kwargs)
+        self.cfg = cfg
+        self.vector_size = vector_size
+
+    def index_encoded_data(
+        self,
+        vector_files: List[str],
+        buffer_size: int,
+        path_id_prefixes: List = None,
+    ):
+        """
+        Do nothing
+        """
+        self._vector_files = vector_files
+        self._buffer_size = buffer_size
+        self._path_id_prefixes = path_id_prefixes
+
+    def reset(self):
+        """
+        Reset the indexer
+        """
+        self.index = hydra.utils.instantiate(self.cfg.indexers[self.cfg.indexer])
+        self.index.init_index(self.vector_size)
+
+    def get_top_docs(
+        self, query_vectors: np.array, top_docs: int = 100
+    ) -> List[Tuple[List[object], List[float]]]:
+        """
+        Do searching in document indices one by one.
+        """
+        assert hasattr(self, "_vector_files")
+        time0 = time.time()
+        tot_results = [
+            ([], []) for _ in range(len(query_vectors))
+        ] # list of tuples (passage_ids, scores), one for each question input
+        larger_is_better = None
+
+        # Iterate over all indices
+        for vector_file in self._vector_files:
+            buffer = []
+            self.reset()  # reset index
+
+            # Load index from a pickle file
+            for item in iterate_encoded_files(
+                [vector_file],
+                path_id_prefixes=self._path_id_prefixes,
+            ):
+                buffer.append(item)
+                if self._buffer_size == len(buffer):
+                    self.index.index_data(buffer)
+                    buffer = []
+            self.index.index_data(buffer)
+
+            # Search
+            results = self.index.search_knn(
+                query_vectors, top_docs)
+
+            # Aggregate
+            assert len(results) == len(tot_results)
+            for i, (passage_ids, scores) in enumerate(results):
+                # Determine whether the scores are better when larger or smaller
+                # Assume top_docs > 1
+                larger_is_better_i = (scores.argmax() == 0)
+                if larger_is_better is not None:
+                    assert larger_is_better == larger_is_better_i
+                else:
+                    larger_is_better = larger_is_better_i
+
+                tot_results[i][0].extend(passage_ids)
+                tot_results[i][1].extend(scores)
+
+        # Post-process
+        for i, (passage_ids, scores) in enumerate(tot_results):
+            idxs = np.argsort(scores)
+            if larger_is_better:
+                idxs = idxs[::-1]
+            idxs = idxs[:top_docs]
+
+            passage_ids = [passage_ids[i] for i in idxs]
+            scores = [scores[i] for i in idxs]
+            tot_results[i] = (passage_ids, scores)
+
+        logger.info("index search time: %f sec.", time.time() - time0)
+        self.index = None
+        return tot_results
+
+
 class MatchLayer(nn.Module):
     """Match layer alone (i.e., linear layer). A "dirty" workaround of Match_BiEncoder."""
     def __init__(self, encoder: nn.Module) -> None:
@@ -451,7 +545,18 @@ def main(cfg: DictConfig):
         for (key, value) in saved_state.model_dict.items()
         if key.startswith(encoder_prefix)
     }
-    model_to_load.load_state_dict(question_encoder_state)
+
+    # Compatibility fix
+    keys = list(model_to_load.state_dict().keys())
+    saved_keys = list(question_encoder_state.keys())
+    if len(keys) > len(saved_keys):
+        missing_keys = list(set(keys) - set(saved_keys))
+        assert all(".position_ids" in key for key in missing_keys)
+        strict = False
+    else:
+        strict = True
+
+    model_to_load.load_state_dict(question_encoder_state, strict=strict)
     vector_size = model_to_load.get_out_size()
     logger.info("Encoder vector_size=%d", vector_size)
 
@@ -489,10 +594,12 @@ def main(cfg: DictConfig):
     index_buffer_sz = index.buffer_size
     index.init_index(vector_size)
 
-    if not cfg.others.is_matching:
-        retriever = LocalFaissRetriever(encoder, cfg.batch_size, tensorizer, index)
-    else:
+    if cfg.others.is_matching:
         retriever = LocalFaissRetrieverWithMatchModels(cfg, encoder, match_layer, cfg.batch_size, tensorizer, index)
+    elif cfg.low_memory_footprint:
+        retriever = LocalLowMemoryFaissRetriever(cfg, vector_size, encoder, cfg.batch_size, tensorizer, index)
+    else:
+        retriever = LocalFaissRetriever(encoder, cfg.batch_size, tensorizer, index)
 
     logger.info("Using special token %s", qa_src.special_query_token)
     questions_tensor = retriever.generate_question_vectors(
