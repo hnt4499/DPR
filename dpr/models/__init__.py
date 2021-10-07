@@ -340,7 +340,7 @@ def init_hf_bert_loss_single_model_score_scaling(args, **kwargs):
 
 def init_hf_bert_loss_single_model_multi_similarity(args, **kwargs):
     from .biencoder_retrievers.biencoder import BiEncoderMultiSimilarityNllLoss
-    return BiEncoderMultiSimilarityNllLoss(args, score_scaling=True)
+    return BiEncoderMultiSimilarityNllLoss(args, **kwargs)
 
 
 def init_hf_bert_loss_ofa_simple(args, **kwargs):
@@ -386,4 +386,8 @@ LOSS_INITIALIZERS = {
 
 
 def init_loss(encoder_type: str, args, **kwargs):
+    # Note that `args` is `cfg`
+    loss_kwargs = args.train.get("loss_kwargs", {})
+    kwargs.update(loss_kwargs)
+
     return init_comp(LOSS_INITIALIZERS, encoder_type, args, **kwargs)
