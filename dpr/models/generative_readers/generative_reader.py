@@ -17,7 +17,7 @@ from torch import Tensor as T
 from torch.utils.checkpoint import checkpoint
 import numpy as np
 
-from transformers.modeling_t5 import (
+from transformers.models.t5.modeling_t5 import (
     T5ForConditionalGeneration,
     T5Model,
     T5Config,
@@ -28,6 +28,7 @@ from transformers.modeling_t5 import (
     T5LayerSelfAttention,
     T5LayerCrossAttention,
 )
+from transformers.modeling_outputs import BaseModelOutputWithPastAndCrossAttentions
 from transformers import T5Tokenizer
 
 from ...utils.model_utils import load_state_dict_to_model
@@ -66,7 +67,6 @@ class CustomT5Block(T5Block):
             if self.is_decoder:
                 self.layer.append(T5LayerCrossAttention(
                     config,
-                    has_relative_attention_bias=has_relative_attention_bias
                 ))
 
             self.layer.append(T5LayerFF(config))
@@ -127,6 +127,9 @@ class CustomT5Stack(T5Stack):
         self.dropout = nn.Dropout(config.dropout_rate)
 
         self.init_weights()
+        # Model parallel
+        self.model_parallel = False
+        self.device_map = None
 
 
 class FiDT5(T5ForConditionalGeneration):
@@ -138,7 +141,7 @@ class FiDT5(T5ForConditionalGeneration):
         gradient_checkpointing: bool = True,
         share_encoder_decoder: bool = False,
     ):
-        super(T5ForConditionalGeneration, self).__init__(config)  # note that call stack
+        super(T5ForConditionalGeneration, self).__init__(config)  # note the call stack
         self.model_dim = config.d_model
         self.num_passages = num_passages
         self._device = device
@@ -151,6 +154,7 @@ class FiDT5(T5ForConditionalGeneration):
         # Initialize the decoder first as it has more layers
         decoder_config = copy.deepcopy(config)
         decoder_config.is_decoder = True
+        decoder_config.is_encoder_decoder = False
         self.decoder = CustomT5Stack(decoder_config, self.shared, block=None)
 
         # Initialize the encoder, with the option of parameter sharing
@@ -177,11 +181,17 @@ class FiDT5(T5ForConditionalGeneration):
             block = None
 
         encoder_config = copy.deepcopy(config)
+        encoder_config.is_decoder = False
         encoder_config.use_cache = False
+        encoder_config.is_encoder_decoder = False
         self.encoder = CustomT5Stack(encoder_config, self.shared, block=block)
 
         self.lm_head = nn.Linear(config.d_model, config.vocab_size, bias=False)
         self.init_weights()
+
+        # Model parallel
+        self.model_parallel = False
+        self.device_map = None
 
     @classmethod
     def init_model(
@@ -283,7 +293,7 @@ class FiDT5(T5ForConditionalGeneration):
             assert attention_mask.shape[1] == self.num_passages
 
         if input_ids is not None:
-            input_ids = input_ids.view(input_ids.size(0), -1)
+            input_ids = input_ids.view(input_ids.size(0), -1)  # (B, N * L)
         if attention_mask is not None:
             attention_mask = attention_mask.view(attention_mask.size(0), -1)
 
@@ -328,7 +338,7 @@ class FiDT5Encoder(nn.Module):
     """
     def __init__(
         self,
-        encoder: T5Stack,
+        encoder: CustomT5Stack,
         num_passages: int,
         device: str,
         gradient_checkpointing: bool = True,
@@ -363,10 +373,14 @@ class FiDT5Encoder(nn.Module):
         input_ids = input_ids.view(-1, passage_length)
         attention_mask = attention_mask.view(-1, passage_length)
 
-        outputs = self.encoder(input_ids, attention_mask, **kwargs)
-        outputs = (
-            outputs[0].view(batch_size, self.num_passages * passage_length, -1),
-        ) + outputs[1:]
+        outputs: BaseModelOutputWithPastAndCrossAttentions = self.encoder(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            **kwargs,
+        )
+        outputs.last_hidden_state = outputs.last_hidden_state.view(
+            batch_size, self.num_passages * passage_length, -1,
+        )
         return outputs
 
 

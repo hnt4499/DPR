@@ -17,10 +17,10 @@ import numpy as np
 import torch
 from torch import Tensor as T
 from torch import nn
-from transformers.modeling_bert import BertConfig, BertModel
+from transformers.models.bert.modeling_bert import BertConfig, BertModel
 from transformers.optimization import AdamW
-from transformers.tokenization_bert import BertTokenizer
-from transformers.tokenization_roberta import RobertaTokenizer
+from transformers.models.bert.tokenization_bert import BertTokenizer
+from transformers.models.roberta.tokenization_roberta import RobertaTokenizer
 
 from dpr.models.biencoder_retrievers.biencoder import BiEncoder
 from dpr.utils.data_utils import Tensorizer
@@ -206,7 +206,7 @@ class HFBertEncoder(BertModel):
         pretrained: bool = True,
         **kwargs
     ) -> BertModel:
-        cfg = BertConfig.from_pretrained(cfg_name if cfg_name else "bert-base-uncased", **kwargs)
+        cfg = BertConfig.from_pretrained(cfg_name if cfg_name else "bert-base-uncased", return_dict=False, **kwargs)
         if dropout != 0:
             cfg.attention_probs_dropout_prob = dropout
             cfg.hidden_dropout_prob = dropout

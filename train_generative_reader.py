@@ -497,7 +497,7 @@ class ReaderTrainer(object):
             input_ids=input.input_ids,
             attention_mask=attn_mask,
             labels=input.answer_ids,
-        )[0]
+        )["loss"]
 
         if cfg.n_gpu > 1:
             loss = loss.mean()

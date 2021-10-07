@@ -16,7 +16,7 @@ from typing import Dict, List
 import torch
 from torch import Tensor as T
 import numpy as np
-from transformers.tokenization_bert import BertTokenizer
+from transformers.models.bert import BertTokenizer
 
 from dpr.models.biencoder_retrievers.biencoder import BiEncoder
 from dpr.models.hf_models import _add_special_tokens, get_optimizer, HFBertEncoder

@@ -11,7 +11,7 @@ Reader model with inter-passage modeling.
 
 import logging
 
-from transformers.modeling_bert import BertModel, BertConfig
+from transformers.models.bert.modeling_bert import BertModel, BertConfig
 
 from ..hf_models import HFBertEncoder, get_optimizer, get_bert_tensorizer
 from .extractive_reader import InterPassageReader
