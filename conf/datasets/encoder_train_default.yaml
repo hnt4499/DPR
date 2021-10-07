@@ -42,6 +42,10 @@ nq_train_hn1:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-adv-hn-train
 
+nq_train_hn1_1k:
+  _target_: dpr.data.biencoder_data.JsonQADataset
+  file: /data/tuyen/openqa/DPR/downloads/data/retriever/nq-adv-hn-train-1k.json
+
 nq_train_hn1_aug:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-adv-hn-train

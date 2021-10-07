@@ -508,6 +508,117 @@ class BiEncoderNllLoss(object):
         return dot_product_scores
 
 
+class BiEncoderMultiSimilarityNllLoss(BiEncoderNllLoss):
+    """
+    BiEncoder multi-similarity NLL loss. In addition to computing the similarities between
+    question and context vectors, we also compute the question-question and context-context
+    similarities.
+
+    Parameters
+    ----------
+    loss_scale_qq : float
+        Loss scale value for question-question similarities.
+    loss_scale_cc : float
+        Loss scale value for context-context similarities.
+    """
+    def __init__(
+        self,
+        *args,
+        loss_scale_qq: float = 1.0,
+        loss_scale_cc: float = 1.0,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.loss_scale_qq = loss_scale_qq
+        self.loss_scale_cc = loss_scale_cc
+
+    def calc(
+        self,
+        q_vectors: T,
+        ctx_vectors: T,
+        positive_idx_per_question: list,
+        hard_negative_idx_per_question: list = None,
+        loss_scale: float = None,
+    ) -> Tuple[T, int]:
+
+        scores_qc = self.get_scores(q_vectors, ctx_vectors)
+        scores_qq = self.get_scores(q_vectors, q_vectors)
+        scores_cc = self.get_scores(ctx_vectors, ctx_vectors)
+
+        # Flatten if needed
+        if len(q_vectors.size()) > 1:
+            q_num = q_vectors.size(0)
+            scores_qc = scores_qc.view(q_num, -1)
+            scores_qq = scores_qq.view(q_num, -1)
+        if len(ctx_vectors.size()) > 1:
+            ctx_num = ctx_vectors.size(0)
+            scores_cc = scores_cc.view(ctx_num, -1)
+
+        # Score scaling, as described in the paper:
+        # Sachan, D. S., Patwary, M., Shoeybi, M., Kant, N., Ping, W., Hamilton, W. L., & Catanzaro, B. (2021).
+        # End-to-End Training of Neural Retrievers for Open-Domain Question Answering.
+        if self.score_scaling:
+            hidden_size = q_vectors.shape[1]
+            scores_qc = scores_qc / (hidden_size ** 0.5)
+            scores_qq = scores_qq / (hidden_size ** 0.5)
+            scores_cc = scores_cc / (hidden_size ** 0.5)
+
+        return self.calc_given_score_matrix(
+            [scores_qc, scores_qq, scores_cc],
+            positive_idx_per_question,
+            loss_scale=loss_scale,
+        )
+
+    def calc_given_score_matrix(
+        self,
+        score_mat: Tuple[T, T, T],
+        positive_idx_per_question: list,
+        loss_scale: float = None,
+        reduction: str = "mean"
+    ) -> Tuple[T, int]:
+        """
+        General utility to calculate NLL loss given the un-normalized score matrices, each
+        of shape (n1, n2), where n1 is the number of questions and n2 is the number of
+        passages in the batch.
+        """
+        scores_qc, scores_qq, scores_cc = score_mat
+        device = scores_qc.device
+        positive_idx_per_question = torch.tensor(positive_idx_per_question).to(device)
+
+        def nll(input, target):
+            softmax_scores = F.log_softmax(input, dim=1)
+            loss = F.nll_loss(
+                softmax_scores,
+                target,
+                reduction=reduction,
+            )
+            return loss
+
+        # Main score: question - context similarities
+        loss_qc = nll(scores_qc, positive_idx_per_question)
+        _, max_idxs = torch.max(scores_qc, 1)
+        correct_predictions_count = (max_idxs == positive_idx_per_question).sum()
+
+        # Question-question similarities
+        loss_qq = nll(
+            scores_qq,
+            torch.arange(end=len(scores_qc), dtype=torch.long, device=device),
+        )
+        # Context-context similarities
+        loss_cc = nll(
+            scores_cc,
+            torch.arange(end=len(scores_cc), dtype=torch.long, device=device),
+        )
+
+        # Sum loss
+        loss = loss_qc + self.loss_scale_qq * loss_qq + self.loss_scale_cc * loss_cc
+
+        if loss_scale:
+            loss.mul_(loss_scale)
+
+        return loss, correct_predictions_count
+
+
 class Match_BiEncoder(BiEncoder):
     def __init__(
         self,

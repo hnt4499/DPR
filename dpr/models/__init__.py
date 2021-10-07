@@ -59,6 +59,11 @@ def init_hf_bert_biencoder_single_model_score_scaling(args, **kwargs):
     return get_bert_biencoder_components(args, **kwargs)
 
 
+def init_hf_bert_biencoder_single_model_multi_similarity(args, **kwargs):
+    from .hf_models_single_model import get_bert_biencoder_components
+    return get_bert_biencoder_components(args, **kwargs)
+
+
 def init_pytext_bert_biencoder(args, **kwargs):
     from .pytext_models import get_bert_biencoder_components
     return get_bert_biencoder_components(args, **kwargs)
@@ -78,6 +83,7 @@ BIENCODER_INITIALIZERS = {
     'hf_bert_single_model_with_projector': init_hf_bert_biencoder_single_model_with_projector,
     'hf_bert_single_model_barlow_twins': init_hf_bert_biencoder_single_model_barlow_twins,
     'hf_bert_single_model_score_scaling': init_hf_bert_biencoder_single_model_score_scaling,
+    'hf_bert_single_model_multi_similarity': init_hf_bert_biencoder_single_model_multi_similarity,
 
     'pytext_bert': init_pytext_bert_biencoder,
     'fairseq_roberta': init_fairseq_roberta_biencoder,
@@ -173,6 +179,23 @@ def init_generative_reader_components(encoder_type: str, args, **kwargs):
     return init_comp(GENERATIVE_READER_INITIALIZERS, encoder_type, args, **kwargs)
 
 
+"""--------------------------- Query Reconstruction ---------------------------"""
+
+
+def init_qr_base(args, **kwargs):
+    from .question_reconstruction.qr_shared_encoder import get_qr_components
+    return get_qr_components(args, **kwargs)
+
+
+QUESTION_RECONSTRUCTION_INITIALIZERS = {
+    'qr_base': init_qr_base,
+}
+
+
+def init_qr_components(encoder_type: str, args, **kwargs):
+    return init_comp(QUESTION_RECONSTRUCTION_INITIALIZERS, encoder_type, args, **kwargs)
+
+
 """------------------------------- Tensorizer -------------------------------"""
 
 
@@ -207,6 +230,11 @@ def init_hf_bert_tenzorizer_single_model_barlow_twins(args, **kwargs):
 
 
 def init_hf_bert_tenzorizer_single_model_score_scaling(args, **kwargs):
+    from .hf_models_single_model import get_bert_tensorizer
+    return get_bert_tensorizer(args)
+
+
+def init_hf_bert_tenzorizer_single_model_multi_similarity(args, **kwargs):
     from .hf_models_single_model import get_bert_tensorizer
     return get_bert_tensorizer(args)
 
@@ -251,6 +279,7 @@ TENSORIZER_INITIALIZERS = {
     'hf_bert_single_model_with_projector': init_hf_bert_tenzorizer_single_model_with_projector,
     'hf_bert_single_model_barlow_twins': init_hf_bert_tenzorizer_single_model_barlow_twins,
     'hf_bert_single_model_score_scaling': init_hf_bert_tenzorizer_single_model_score_scaling,
+    'hf_bert_single_model_multi_similarity': init_hf_bert_tenzorizer_single_model_multi_similarity,
 
     'hf_bert_ofa_simple': init_hf_bert_ofa_simple_tensorizer,
     'hf_bert_simple_ofa': init_hf_bert_ofa_simple_tensorizer,  # for backward compatibility
@@ -309,6 +338,11 @@ def init_hf_bert_loss_single_model_score_scaling(args, **kwargs):
     return BiEncoderNllLoss(args, score_scaling=True)
 
 
+def init_hf_bert_loss_single_model_multi_similarity(args, **kwargs):
+    from .biencoder_retrievers.biencoder import BiEncoderMultiSimilarityNllLoss
+    return BiEncoderMultiSimilarityNllLoss(args, score_scaling=True)
+
+
 def init_hf_bert_loss_ofa_simple(args, **kwargs):
     from .biencoder_retrievers.biencoder import BiEncoderNllLoss
     return BiEncoderNllLoss(args)
@@ -338,6 +372,7 @@ LOSS_INITIALIZERS = {
     'hf_bert_single_model_with_projector': init_hf_bert_loss_single_model_with_projector,
     'hf_bert_single_model_barlow_twins': init_hf_bert_loss_single_model_barlow_twins,
     'hf_bert_single_model_score_scaling': init_hf_bert_loss_single_model_score_scaling,
+    'hf_bert_single_model_multi_similarity': init_hf_bert_loss_single_model_multi_similarity,
 
     'hf_bert_ofa_simple': init_hf_bert_loss_ofa_simple,
     'hf_bert_simple_ofa': init_hf_bert_loss_ofa_simple,  # for backward compatibility
