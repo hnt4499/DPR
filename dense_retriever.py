@@ -451,6 +451,8 @@ def save_results(
             }
         )
 
+    save_dir, _ = os.path.split(out_file)
+    os.makedirs(save_dir, exist_ok=True)
     with open(out_file, "w") as writer:
         writer.write(json.dumps(merged_data, indent=4) + "\n")
     logger.info("Saved results * scores  to %s", out_file)
@@ -581,7 +583,10 @@ def main(cfg: DictConfig):
     ds_key = cfg.qa_dataset
     logger.info("qa_dataset: %s", ds_key)
 
-    qa_src = hydra.utils.instantiate(cfg.datasets[ds_key])
+    qa_path = cfg.qa_path
+    kwargs = {} if qa_path is None else {"file": qa_path}
+
+    qa_src = hydra.utils.instantiate(cfg.datasets[ds_key], **kwargs)
     qa_src.load_data()
 
     for ds_item in qa_src.data:

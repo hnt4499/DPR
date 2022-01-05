@@ -15,6 +15,7 @@ indexers:
 
 # the name of the queries dataset from the 'datasets' config group
 qa_dataset:
+qa_path:  # allow override
 
 # a list of names of the passages datasets from the 'ctx_sources' config group
 ctx_datatsets:

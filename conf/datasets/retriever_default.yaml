@@ -23,3 +23,7 @@ trivia_train:
 trivia_dev:
   _target_: dpr.data.retriever_data.CsvQASrc
   file: data.retriever.qas.trivia-dev
+
+conditional_qg:
+  _target_: dpr.data.retriever_data.CsvQASrc
+  file: /opt/tiger/development/query_expansion/experiments/5_dpr_retrieval/1_convert_to_dpr_format/generated/psgs_w100_opa/dummy.txt
