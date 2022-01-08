@@ -21,12 +21,21 @@ logger = logging.getLogger()
 
 
 class DenseIndexer(object):
-    def __init__(self, buffer_size: int = 50000):
+    _gpu_res = None  # placeholder for a GPU resource
+
+    def __init__(self, buffer_size: int = 50000, use_gpu: bool = False):
         self.buffer_size = buffer_size
         self.index_id_to_db_id = []
         self.index = None
+        self.use_gpu = use_gpu
 
-    def init_index(self, vector_sz: int):
+    @property
+    def gpu_res(self):
+        if DenseIndexer._gpu_res is None:
+            DenseIndexer._gpu_res = faiss.StandardGpuResources()  # use a single GPU
+        return DenseIndexer._gpu_res
+
+    def init_index(self, vector_sz: int, use_gpu: bool):
         raise NotImplementedError
 
     def index_data(self, data: List[Tuple[object, np.array]]):
@@ -93,11 +102,11 @@ class DenseIndexer(object):
 
 
 class DenseFlatIndexer(DenseIndexer):
-    def __init__(self, buffer_size: int = 50000):
-        super(DenseFlatIndexer, self).__init__(buffer_size=buffer_size)
 
     def init_index(self, vector_sz: int):
         self.index = faiss.IndexFlatIP(vector_sz)
+        if self.use_gpu:
+            self.index = faiss.index_cpu_to_gpu(self.gpu_res, 0, self.index)
 
     def index_data(self, data: List[Tuple[object, np.array]]):
         n = len(data)
@@ -154,8 +163,9 @@ class DenseHNSWFlatIndexer(DenseIndexer):
         store_n: int = 512,
         ef_search: int = 128,
         ef_construction: int = 200,
+        use_gpu: bool = False,
     ):
-        super(DenseHNSWFlatIndexer, self).__init__(buffer_size=buffer_size)
+        super(DenseHNSWFlatIndexer, self).__init__(buffer_size=buffer_size, use_gpu=use_gpu)
         self.store_n = store_n
         self.ef_search = ef_search
         self.ef_construction = ef_construction
@@ -168,6 +178,9 @@ class DenseHNSWFlatIndexer(DenseIndexer):
         index.hnsw.efSearch = self.ef_search
         index.hnsw.efConstruction = self.ef_construction
         self.index = index
+
+        if self.use_gpu:
+            self.index = faiss.index_cpu_to_gpu(self.gpu_res, 0, self.index)
 
     def _index_data(self, data: List[Tuple[object, np.array]]):
         n = len(data)
@@ -240,20 +253,6 @@ class DenseHNSWSQIndexer(DenseHNSWFlatIndexer):
     Efficient index for retrieval. Note: default settings are for hugh accuracy but also high RAM usage
     """
 
-    def __init__(
-        self,
-        buffer_size: int = 1e10,
-        store_n: int = 128,
-        ef_search: int = 128,
-        ef_construction: int = 200,
-    ):
-        super(DenseHNSWSQIndexer, self).__init__(
-            buffer_size=buffer_size,
-            store_n=store_n,
-            ef_search=ef_search,
-            ef_construction=ef_construction,
-        )
-
     def init_index(self, vector_sz: int):
         # IndexHNSWFlat supports L2 similarity only
         # so we have to apply DOT -> L2 similairy space conversion with the help of an extra dimension
@@ -263,6 +262,9 @@ class DenseHNSWSQIndexer(DenseHNSWFlatIndexer):
         index.hnsw.efSearch = self.ef_search
         index.hnsw.efConstruction = self.ef_construction
         self.index = index
+
+        if self.use_gpu:
+            self.index = faiss.index_cpu_to_gpu(self.gpu_res, 0, self.index)
 
     def train(self, vectors: np.array):
         self.index.train(vectors)

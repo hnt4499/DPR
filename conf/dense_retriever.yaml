@@ -56,6 +56,11 @@ validate_as_tables: False
 rpc_retriever_cfg_file:
 indexer: flat
 low_memory_footprint: False
+use_gpu: False
+
+# Save / load pre-computed question encoding
+save_encoding_to:
+load_encoding_from:
 
 # tokens which won't be slit by tokenizer
 special_tokens:

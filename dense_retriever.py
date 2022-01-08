@@ -9,6 +9,8 @@
  Command line tool to get dense results and validate them
 """
 
+import faiss  # this is important to avoid conflicts
+
 import os
 import math
 import glob
@@ -219,7 +221,10 @@ class LocalLowMemoryFaissRetriever(LocalFaissRetriever):
         """
         Reset the indexer
         """
-        self.index = hydra.utils.instantiate(self.cfg.indexers[self.cfg.indexer])
+        self.index = hydra.utils.instantiate(
+            self.cfg.indexers[self.cfg.indexer],
+            use_gpu=self.cfg.use_gpu,
+        )
         self.index.init_index(self.vector_size)
 
     def get_top_docs(
@@ -237,6 +242,7 @@ class LocalLowMemoryFaissRetriever(LocalFaissRetriever):
 
         # Iterate over all indices
         for vector_file in self._vector_files:
+            logger.info(f"[{self.__class__.__name__}] File: {vector_file}")
             buffer = []
             self.reset()  # reset index
 
@@ -594,7 +600,7 @@ def main(cfg: DictConfig):
         questions.append(question)
         question_answers.append(answers)
 
-    index = hydra.utils.instantiate(cfg.indexers[cfg.indexer])
+    index = hydra.utils.instantiate(cfg.indexers[cfg.indexer], use_gpu=cfg.use_gpu)
     logger.info("Index class %s ", type(index))
     index_buffer_sz = index.buffer_size
     index.init_index(vector_size)
@@ -606,10 +612,22 @@ def main(cfg: DictConfig):
     else:
         retriever = LocalFaissRetriever(encoder, cfg.batch_size, tensorizer, index)
 
-    logger.info("Using special token %s", qa_src.special_query_token)
-    questions_tensor = retriever.generate_question_vectors(
-        questions, query_token=qa_src.special_query_token
-    )
+    # Generate question encodings
+    if cfg.load_encoding_from is not None:
+        assert cfg.save_encoding_to is None
+        logger.info(f"Loading pre-computed encodings from {cfg.load_encoding_from}")
+        questions_tensor = torch.load(cfg.load_encoding_from, map_location="cpu")
+    else:
+        logger.info("Using special token %s", qa_src.special_query_token)
+        questions_tensor = retriever.generate_question_vectors(
+            questions, query_token=qa_src.special_query_token
+        )
+
+    if cfg.save_encoding_to is not None:
+        logger.info(f"Saving encodings to {cfg.save_encoding_to}")
+        save_dir, _ = os.path.split(cfg.save_encoding_to)
+        os.makedirs(save_dir, exist_ok=True)
+        torch.save(questions_tensor, cfg.save_encoding_to)
 
     if qa_src.selector:
         logger.info("Using custom representation token selector")
