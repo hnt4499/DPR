@@ -24,11 +24,13 @@ ctx_datatsets:
 encoded_ctx_files: []
 
 out_file:
+save_as_text_file: False
+
 # "regex" or "string"
 match: string
 n_docs: 100
 n_docs_match: 200  # for first stage of `Match_BiEncoder`; `n_docs` will then be of the second stage
-validation_workers: 16
+validation_workers: 1
 
 # Batch size to generate query embeddings
 batch_size: 128

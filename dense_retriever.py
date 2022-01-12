@@ -22,6 +22,7 @@ from typing import List, Tuple, Dict, Iterator
 
 import hydra
 import numpy as np
+from tqdm import tqdm
 import torch
 import torch.nn.functional as F
 import omegaconf
@@ -428,11 +429,18 @@ def save_results(
     top_passages_and_scores: List[Tuple[List[object], List[float]]],
     per_question_hits: List[List[bool]],
     out_file: str,
+    save_as_text_file: bool = False,
 ):
-    # join passages text with the result ids, their questions and assigning has|no answer labels
-    merged_data = []
+    save_dir, _ = os.path.split(out_file)
+    os.makedirs(save_dir, exist_ok=True)
+    if save_as_text_file:
+        fout = open(out_file, "w")
+    else:
+        # join passages text with the result ids, their questions and assigning has|no answer labels
+        merged_data = []
+
     # assert len(per_question_hits) == len(questions) == len(answers)
-    for i, q in enumerate(questions):
+    for i, q in enumerate(tqdm(questions)):
         q_answers = answers[i]
         results_and_scores = top_passages_and_scores[i]
         hits = per_question_hits[i]
@@ -440,27 +448,32 @@ def save_results(
         scores = [str(score) for score in results_and_scores[1]]
         ctxs_num = len(hits)
 
-        merged_data.append(
+        ctxs = [
             {
-                "question": q,
-                "answers": q_answers,
-                "ctxs": [
-                    {
-                        "id": results_and_scores[0][c],
-                        "title": docs[c][1],
-                        "text": docs[c][0],
-                        "score": scores[c],
-                        "has_answer": hits[c],
-                    }
-                    for c in range(ctxs_num)
-                ],
+                "id": results_and_scores[0][c],
+                "title": docs[c][1],
+                "text": docs[c][0],
+                "score": scores[c],
+                "has_answer": hits[c],
             }
-        )
+            for c in range(ctxs_num)
+        ]
 
-    save_dir, _ = os.path.split(out_file)
-    os.makedirs(save_dir, exist_ok=True)
-    with open(out_file, "w") as writer:
-        writer.write(json.dumps(merged_data, indent=4) + "\n")
+        if save_as_text_file:
+            fout.write(json.dumps(ctxs) + "\n")
+
+        else:
+            merged_data.append(
+                {
+                    "question": q,
+                    "answers": q_answers,
+                    "ctxs": ctxs,
+                }
+            )
+
+    if not save_as_text_file:
+        with open(out_file, "w") as writer:
+            writer.write(json.dumps(merged_data, indent=4) + "\n")
     logger.info("Saved results * scores  to %s", out_file)
 
 
@@ -738,6 +751,7 @@ def main(cfg: DictConfig):
             top_ids_and_scores,
             questions_doc_hits,
             cfg.out_file,
+            save_as_text_file=cfg.save_as_text_file,
         )
         if cfg.others.is_matching:
             out_file, _ = os.path.splitext(cfg.out_file)
@@ -749,6 +763,7 @@ def main(cfg: DictConfig):
                 top_ids_and_scores_second_stage,
                 questions_doc_hits_match,
                 out_file,
+                save_as_text_file=cfg.save_as_text_file,
             )
 
     if cfg.kilt_out_file:

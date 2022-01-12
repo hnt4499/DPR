@@ -20,7 +20,7 @@ from functools import partial
 from typing import Tuple, List, Dict
 
 import nltk
-
+from tqdm import tqdm
 
 from dpr.data.retriever_data import TableChunk
 from dpr.utils.tokenizers import SimpleTokenizer
@@ -63,14 +63,13 @@ def calculate_matches(
     tok_opts = {}
     tokenizer = SimpleTokenizer(**tok_opts)
 
-    processes = ProcessPool(processes=workers_num)
     logger.info("Matching answers in top docs...")
-    get_score_partial = partial(
-        check_answer, match_type=match_type, tokenizer=tokenizer
-    )
-
     questions_answers_docs = zip(answers, closest_docs)
-    scores = processes.map(get_score_partial, questions_answers_docs)
+    scores = []
+    for questions_answers_docs_i in tqdm(questions_answers_docs, total=len(answers)):
+        scores_i = check_answer(
+            questions_answers_docs_i, match_type=match_type, tokenizer=tokenizer)
+        scores.append(scores_i)
 
     logger.info("Per question validation results len=%d", len(scores))
 
