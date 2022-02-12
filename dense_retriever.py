@@ -653,6 +653,10 @@ def main(cfg: DictConfig):
         id_prefixes.append(ctx_src.id_prefix)
         ctx_sources.append(ctx_src)
 
+    if len(ctx_sources) == 1:
+        ctx_sources = ctx_sources * len(cfg.encoded_ctx_files)
+        id_prefixes = id_prefixes * len(cfg.encoded_ctx_files)
+
     logger.info("id_prefixes per dataset: %s", id_prefixes)
 
     # index all passages

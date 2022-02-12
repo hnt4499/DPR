@@ -26,21 +26,152 @@ from torch import Tensor as T
 from dpr.data.data_types import (
     BiEncoderBatch,
     BiEncoderPredictionBatch,
-    ForwardPassOutputsTrain
+    ForwardPassOutputsTrain,
+    DataPassage,
+    DataSample,
 )
-from dpr.utils.dist_utils import gather
+from dpr.utils.dist_utils import gather, get_tqdm
+from dpr.utils.misc_utils import count_lines_text_file
+
 
 logger = logging.getLogger()
 
 
+class DataPassageCompressor:
+    """
+    Compress / decompress DataSample / DataPassage objects.
+    """
+
+    @staticmethod
+    def convert_to_json(obj):
+        if isinstance(obj, (int, float, str, bool, type(None))):
+            return obj
+
+        elif isinstance(obj, (tuple, list)):
+            # Convert
+            list_of_subobjs = [DataPassageCompressor.convert_to_json(i) for i in obj]
+
+            # Compress
+            if len(obj) > 0 and isinstance(obj[0], (DataPassage, DataSample)):
+                keys = [tuple(i.keys()) for i in list_of_subobjs]
+                assert len(set(keys)) == 1  # all objects must be of the same type
+                compressed_obj = {key: [] for key in keys[0]}
+                for subobj in list_of_subobjs:
+                    for key, value in subobj.items():
+                        compressed_obj[key].append(value)
+                assert "compressed" not in compressed_obj
+                compressed_obj["compressed"] = {
+                    "num_objects": len(obj),
+                    "keys": keys[0],
+                }  # marker
+                return compressed_obj
+            else:
+                return type(obj)(list_of_subobjs)
+
+        elif isinstance(obj, dict):
+            return {
+                key: DataPassageCompressor.convert_to_json(value)
+                for key, value in obj.items()
+            }
+        elif isinstance(obj, (DataPassage, DataSample)):
+            t = obj.__class__.__name__
+            obj_dict = obj.__dict__.copy()
+
+            # Remove container; this attribute can be reconstructed later
+            if isinstance(obj, DataSample):
+                obj_dict.pop("container")
+
+            # Add marker
+            assert "type" not in obj_dict
+            obj_dict["type"] = t
+            return DataPassageCompressor.convert_to_json(obj_dict)
+
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            raise NotImplementedError(f"Unsupported object type: {type(obj)}")
+
+    @staticmethod
+    def convert_from_json(obj):
+        if isinstance(obj, (int, float, str, bool, type(None), np.ndarray)):
+            return obj
+
+        elif isinstance(obj, (tuple, list)):
+            # np array
+            if len(obj) > 0 and all(isinstance(i, (int, float)) for i in obj):
+                return np.array(obj)
+            else:
+                list_of_subobjs = [DataPassageCompressor.convert_from_json(i) for i in obj]
+                return type(obj)(list_of_subobjs)
+
+        elif isinstance(obj, dict):
+            # De-compress
+            if "compressed" in obj:
+                compressed_info = obj.pop("compressed")
+                num_objects, keys = compressed_info["num_objects"], compressed_info["keys"]
+                list_of_subobjs = []
+
+                for i in range(num_objects):
+                    subobj = {key: obj[key][i] for key in keys}
+                    subobj = DataPassageCompressor.convert_from_json(subobj)
+                    list_of_subobjs.append(subobj)
+                return list_of_subobjs
+
+            elif "type" in obj:
+                obj_type = obj.pop("type")
+                obj = {
+                    key: DataPassageCompressor.convert_from_json(value)
+                    for key, value in obj.items()
+                }
+
+                # DataPassage requires a special kind of initialization
+                if obj_type == "DataPassage":
+                    obj_ = DataPassage(id=-1)
+                    for key, value in obj.items():
+                        setattr(obj_, key, value)
+                    obj = obj_
+                # DataSample requires an additional `container` attribute
+                elif obj_type == "DataSample":
+                    obj = DataSample(**obj)
+                    obj.container = [
+                        obj.gold_passages,
+                        obj.positive_passages,
+                        obj.distantly_positive_passages,
+                        obj.negative_passages,
+                        obj.bm25_positive_passages,
+                        obj.bm25_distantly_positive_passages,
+                        obj.bm25_negative_passages,
+                    ]
+                return obj
+
+            else:
+                return {
+                    key: DataPassageCompressor.convert_from_json(value)
+                    for key, value in obj.items()
+                }
+
+        else:
+            raise NotImplementedError(f"Unsupported object type: {type(obj)}")
+
+
 def read_serialized_data_from_files(paths: List[str]) -> List:
     results = []
-    for i, path in enumerate(paths):
-        with open(path, "rb") as reader:
-            logger.info("Reading file %s", path)
-            data = pickle.load(reader)
+    for path in paths:
+        logger.info("Reading file %s", path)
+
+        if path.endswith(".json"):  # compressed one
+            tqdm = get_tqdm()
+            num_lines = count_lines_text_file(path)
+            with open(path, "r") as fin:
+                for line in tqdm(fin, total=num_lines):
+                    datapoint = DataPassageCompressor.convert_from_json(json.loads(line.strip()))
+                    results.append(datapoint)
+        else:
+            with open(path, "rb") as reader:
+                data = pickle.load(reader)
             results.extend(data)
-            logger.info("Aggregated data size: {}".format(len(results)))
+
+        logger.info("Aggregated data size: {}".format(len(results)))
     logger.info("Total data size: {}".format(len(results)))
     return results
 

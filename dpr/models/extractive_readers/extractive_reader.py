@@ -285,7 +285,7 @@ def create_reader_input(
 
     for sample in samples:
         if is_train:
-            positive_ctxs = sample.positive_passages
+            positive_ctxs = sample.gold_passages + sample.positive_passages
             negative_ctxs = sample.negative_passages
         else:
             positive_ctxs = []

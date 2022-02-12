@@ -14,6 +14,7 @@ from typing import List, Tuple
 
 import torch
 import torch.distributed as dist
+from tqdm import tqdm as tqdm_orig
 
 
 def get_rank():
@@ -120,3 +121,18 @@ def gather(cfg, objects_to_sync: List[object]) -> List[Tuple]:
 
     gathered_objects = list(zip(*gathered_objects))
     return gathered_objects
+
+
+def is_main_process():
+    if (not dist.is_available()) or (not dist.is_initialized()):
+        return True
+    return get_rank() == 0
+
+
+def get_tqdm():
+    if is_main_process():
+        return tqdm_orig
+    else:
+        def do_nothing(x, *args, **kwargs):
+            return x
+        return do_nothing

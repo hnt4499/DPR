@@ -14,12 +14,15 @@ from functools import partial
 from typing import List, Tuple, Dict, Optional, Iterable
 
 import torch
-from torch import Tensor as T
 from tqdm import tqdm
 import numpy as np
 
 from dpr.data.data_types import DataPassage, DataSample
-from dpr.utils.data_utils import Tensorizer, read_serialized_data_from_files
+from dpr.utils.data_utils import (
+    Tensorizer,
+    read_serialized_data_from_files,
+    DataPassageCompressor,
+)
 from dpr.data.answers_processing import get_expanded_answer
 
 logger = logging.getLogger()
@@ -80,7 +83,7 @@ class TokenizedWikipediaPassages(object):
 class GeneralDataset(torch.utils.data.Dataset):
     """
     General-purpose dataset for both retriever (biencoder) and reader. Input data is expected to be output of a
-    trained retriever.
+    trained retriever. This serves as a preprocessor as well as a container, to be wrapper by other classes.
     """
     def __init__(
         self,
@@ -96,6 +99,8 @@ class GeneralDataset(torch.utils.data.Dataset):
         debugging: bool = False,
         load_data: bool = True,
         check_pre_tokenized_data: bool = True,
+        cfg: "PreprocessingCfg" = None,
+        compress: bool = False,
     ):
         """Initialize general dataset.
 
@@ -113,6 +118,9 @@ class GeneralDataset(torch.utils.data.Dataset):
         :param load_data: whether to load pre-processes data into memory. Disable this if you want to pre-process data only
         :param check_pre_tokenized_data: whether to check if the pre-tokenized context data is the same as original
             context passage after tokenized.
+        :param cfg: configs to overwrite default preprocessing configs. Can be partially set (i.e., some key-value pairs
+            may be set and some may not.)
+        :param compress: whether to compress the outputs and save it as a *.json file.
         """
         self.files = files
         self.bm25_retrieval_file = bm25_retrieval_file
@@ -127,6 +135,8 @@ class GeneralDataset(torch.utils.data.Dataset):
         self.debugging = debugging
         self.load_data_ = load_data
         self.check_pre_tokenized_data = check_pre_tokenized_data
+        self.cfg = cfg
+        self.compress = compress
 
     def __getitem__(self, index: int) -> DataSample:
         return self.data[index]
@@ -167,8 +177,10 @@ class GeneralDataset(torch.utils.data.Dataset):
             dir_path, base_name = os.path.split(path)
             base_name = base_name.replace(".json", "")
             out_file_prefix = os.path.join(dir_path, base_name)
-            out_file_pattern = out_file_prefix + "*.pkl"
-            return glob.glob(out_file_pattern), out_file_prefix
+
+            files = glob.glob(out_file_prefix + "*.pkl")
+            files_2 = glob.glob(out_file_prefix + ".preprocessed.*.json")  # for compressed data
+            return files + files_2, out_file_prefix
 
         serialized_files, out_file_prefix = _find_cached_files(data_files[0])
         if len(serialized_files) > 0:
@@ -196,6 +208,8 @@ class GeneralDataset(torch.utils.data.Dataset):
                 self.check_pre_tokenized_data,
                 num_workers=self.num_workers,
                 debugging=self.debugging,
+                cfg=self.cfg,
+                compress=self.compress,
             )
             self.tensorizer.set_pad_to_max(True)
 
@@ -228,6 +242,8 @@ def preprocess_retriever_results(
     num_workers: int = 8,
     double_check: bool = True,
     debugging: bool = False,
+    cfg: "PreprocessingCfg" = None,
+    compress: bool = False,
 ) -> List[str]:
     """
     Preprocess the dense retriever outputs (or any compatible file format) into the general retriever/reader input data and
@@ -248,6 +264,8 @@ def preprocess_retriever_results(
         context passage after tokenized.
     :param num_workers: the number of parallel processes for conversion
     :param double_check: double check whether the pre-tokenized tokens are correct
+    :param cfg: configs to overwrite default preprocessing configs.
+    :param compress: whether to compress the outputs and save it as a *.json file.
     :return: path to serialized, preprocessed pickle files
     """
     # Load dense retriever results
@@ -305,7 +323,8 @@ def preprocess_retriever_results(
         tensorizer=tensorizer,
         is_train_set=is_train_set,
         check_pre_tokenized_data=check_pre_tokenized_data,
-
+        cfg=cfg,
+        compress=compress,
     )
     serialized_files = []
     for file_name in workers.map(_parse_batch, chunks):
@@ -326,6 +345,8 @@ def _preprocess_samples_by_chunk(
     tensorizer: Tensorizer,
     is_train_set: bool,
     check_pre_tokenized_data: bool,
+    cfg: "PreprocessingCfg" = None,
+    compress: bool = False,
 ) -> str:
     chunk_id, samples, bm25_samples = samples
     logger.info("Start batch %d", len(samples))
@@ -338,6 +359,7 @@ def _preprocess_samples_by_chunk(
         tensorizer,
         is_train_set=is_train_set,
         check_pre_tokenized_data=check_pre_tokenized_data,
+        cfg=cfg,
     )
 
     # Gather results
@@ -346,10 +368,20 @@ def _preprocess_samples_by_chunk(
         r.on_serialize()
         results.append(r)
 
-    out_file = out_file_prefix + "." + str(chunk_id) + ".pkl"
-    with open(out_file, mode="wb") as f:
-        logger.info("Serialize %d results to %s", len(results), out_file)
-        pickle.dump(results, f)
+    out_file = out_file_prefix + "." + str(chunk_id) + (".json" if compress else ".pkl")
+    # Compress
+    if compress:
+        logger.info(f"Compressing and writing results to {out_file}")
+        with open(out_file, "w") as fout:
+            for results_i in tqdm(results):
+                results_i = DataPassageCompressor.convert_to_json(results_i)
+                fout.write(json.dumps(results_i) + "\n")
+    # Old way
+    else:
+        with open(out_file, mode="wb") as f:
+            logger.info("Serialize %d results to %s", len(results), out_file)
+            pickle.dump(results, f)
+
     return out_file
 
 
@@ -378,6 +410,11 @@ PreprocessingCfg = collections.namedtuple(
         "normalize_questions",
         # Set True for generative reader (FiD), where positive or negative don't matter
         "skip_finding_answer_spans",
+        # If answers cannot be found in the passage that has been marked as having answers, do lowercase for both the
+        # passage and answers and try to find them again; newly added to support generative readers (e.g., FiD)
+        # This happens when `dense_retrieve.py` uses uncased BERT, which marks a passage as having answer spans
+        # although their cases (upper or lower cases) might not match.
+        "try_lower_case_if_answers_not_found",
     ],
 )
 
@@ -392,6 +429,7 @@ DEFAULT_PREPROCESSING_CFG_TRAIN = PreprocessingCfg(
     should_negatives_contain_answer=False,  # see description above
     normalize_questions=True,  # see description above
     skip_finding_answer_spans=False,
+    try_lower_case_if_answers_not_found=False,
 )
 
 """
@@ -410,6 +448,7 @@ DEFAULT_PREPROCESSING_CFG_TRAIN_GENERATIVE_READER = PreprocessingCfg(
     should_negatives_contain_answer=False,  # see description above
     normalize_questions=True,  # see description above
     skip_finding_answer_spans=True,
+    try_lower_case_if_answers_not_found=False,
 )
 
 
@@ -420,7 +459,7 @@ def _preprocess_retriever_data(
     gold_info_file: Optional[str],
     gold_info_processed_file: str,
     tensorizer: Tensorizer,
-    cfg: PreprocessingCfg = DEFAULT_PREPROCESSING_CFG_TRAIN,
+    cfg: PreprocessingCfg = None,
     is_train_set: bool = True,
     check_pre_tokenized_data: bool = True,
 ) -> Iterable[DataSample]:
@@ -430,21 +469,29 @@ def _preprocess_retriever_data(
     :param bm25_samples: bm25 retrieval results; list of tuples of tuples of (passage_id, score), where passages of each
         sample are already sorted by their scores
     :param gold_info_file: optional path for the 'gold passages & questions' file. Required to get best results for NQ
-    :param gold_info_processed_file: path to the preprocessed gold passages pickle file. Unlike `gold_passages_file` which
-        contains original gold passages, this file should contain processed, matched, 100-word split passages that match
-        with the original gold passages.
+    :param gold_info_processed_file: path to the preprocessed gold passages pickle file. Unlike `gold_passages_file`
+        which contains original gold passages, this file should contain processed, matched, 100-word split passages that
+        match with the original gold passages.
     :param tensorizer: Tensorizer object for text to model input tensors conversions
     :param cfg: PreprocessingCfg object with positive and negative passage selection parameters
     :param is_train_set: if the data should be processed as a train set
     :return: iterable of DataSample objects which can be consumed by the reader model
     """
+    # Overwrite default configs
+    if cfg is None:
+        cfg = {}
+    elif isinstance(cfg, PreprocessingCfg):
+        cfg = cfg._asdict()
+    default_cfg = DEFAULT_PREPROCESSING_CFG_TRAIN._asdict()
+    default_cfg.update(cfg)
+    cfg = PreprocessingCfg(**default_cfg)
+
     gold_passage_map, canonical_questions = (
         _get_gold_ctx_dict(gold_info_file) if gold_info_file is not None else ({}, {})
     )
     processed_gold_passage_map = (
-        _get_processed_gold_ctx_dict(gold_info_processed_file) if gold_info_processed_file else {}
+        _get_processed_gold_ctx_dict(gold_info_processed_file) if gold_info_processed_file is not None else {}
     )
-
 
     number_no_positive_samples = 0
     number_samples_from_gold = 0
@@ -575,6 +622,7 @@ def _select_passages(
             warn_if_has_answer=False, raise_if_has_answer=False,
             recheck_negatives=False,
             skip_finding_answer_spans=cfg.skip_finding_answer_spans,
+            try_lower_case_if_answers_not_found=cfg.try_lower_case_if_answers_not_found,
         )  # find answer spans for all passages
         if gold_ctx.has_answer:
             gold_ctxs = [gold_ctx]
@@ -597,6 +645,7 @@ def _select_passages(
             warn_if_has_answer=(not ctx.has_answer),  # warn if originally it does NOT contain answer string
             recheck_negatives=cfg.recheck_negatives,
             skip_finding_answer_spans=cfg.skip_finding_answer_spans,
+            try_lower_case_if_answers_not_found=cfg.try_lower_case_if_answers_not_found,
         )
         for ctx in ctxs
     ]
@@ -617,6 +666,7 @@ def _select_passages(
             warn_if_no_answer=False, warn_if_has_answer=False,
             recheck_negatives=True,  # `has_answer` of any BM25 passage is None
             skip_finding_answer_spans=cfg.skip_finding_answer_spans,
+            try_lower_case_if_answers_not_found=cfg.try_lower_case_if_answers_not_found,
         )
         for ctx in bm25_ctxs
     ]
@@ -632,6 +682,18 @@ def _select_passages(
     # Filter unwanted positive passages if training
     if is_train_set:
 
+        # Check whether each positive is from the same page (article) as
+        # the corresponding gold positive passages
+        for positives in [positive_samples, bm25_positive_samples]:
+            for ctx in positives:
+                _is_from_gold_wiki_page(
+                    gold_passage_map,
+                    ctx,
+                    tensorizer.tensor_to_text(torch.from_numpy(ctx.title_token_ids)),
+                    question,
+                    tensorizer,
+                )
+
         # Get positives that are from gold positive passages
         if cfg.gold_page_only_positives:
             selected_positive_ctxs: List[DataPassage] = []
@@ -643,15 +705,8 @@ def _select_passages(
                 (positive_samples, selected_positive_ctxs, selected_negative_ctxs, distantly_positive_samples),
                 (bm25_positive_samples, selected_bm25_positive_ctxs, selected_bm25_negative_ctxs, bm25_distantly_positive_samples)
             ]:
-
                 for ctx in positives:
-                    is_from_gold = _is_from_gold_wiki_page(
-                        gold_passage_map,
-                        ctx,
-                        tensorizer.tensor_to_text(torch.from_numpy(ctx.title_token_ids)),
-                        question
-                    )
-                    if is_from_gold:
+                    if ctx.is_from_gold:
                         selected_positives.append(ctx)
                     else:  # if it has answer but does not come from gold passage
                         if cfg.should_negatives_contain_answer:
@@ -682,6 +737,7 @@ def _select_passages(
                     warn_if_no_answer=False, warn_if_has_answer=False,
                     recheck_negatives=True,
                     skip_finding_answer_spans=cfg.skip_finding_answer_spans,
+                    try_lower_case_if_answers_not_found=cfg.try_lower_case_if_answers_not_found,
                 )  # warn below
 
                 if not gold_passage.has_answer:
@@ -772,6 +828,7 @@ def _find_answer_spans(
     raise_if_has_answer: bool = False,
     recheck_negatives: bool = False,
     skip_finding_answer_spans: bool = False,  # for generative reader (FiD), where positive or negative don't matter
+    try_lower_case_if_answers_not_found: bool = False,
 ) -> DataPassage:
 
     if skip_finding_answer_spans:
@@ -788,7 +845,20 @@ def _find_answer_spans(
     # flatten spans list
     answer_spans = [item for sublist in answer_spans for item in sublist]
     answers_spans = list(filter(None, answer_spans))
-    ctx.answers_spans = answers_spans
+
+    # Lowercase both the passage and answers if the passage originally contains answers
+    if len(answers_spans) == 0 and ctx.has_answer and try_lower_case_if_answers_not_found:
+        passage_text_lowercased = tensorizer.tensor_to_text(torch.from_numpy(ctx.passage_token_ids)).lower()
+        passage_token_ids_lowercased = tensorizer.text_to_tensor(
+            text=passage_text_lowercased.lower(), add_special_tokens=False)
+        answers_token_ids_lowercased = [
+            tensorizer.text_to_tensor(answer.lower(), add_special_tokens=False)
+            for answer in answers
+        ]
+        answers_spans = [
+            _find_answer_positions(passage_token_ids_lowercased, answer_token_ids_lowercased)
+            for answer_token_ids_lowercased in answers_token_ids_lowercased
+        ]
 
     if len(answers_spans) == 0 and (warn_if_no_answer or raise_if_no_answer):
         passage_text = tensorizer.tensor_to_text(torch.from_numpy(ctx.passage_token_ids))
@@ -816,6 +886,7 @@ def _find_answer_spans(
         else:
             logger.warning(message)
 
+    ctx.answers_spans = answers_spans
     ctx.has_answer = bool(answers_spans)
 
     return ctx
@@ -907,11 +978,19 @@ def _get_processed_gold_ctx_dict(file: str) -> Dict[str, DataPassage]:
 
 
 def _is_from_gold_wiki_page(
-    gold_passage_map: Dict[str, DataPassage], passage: DataPassage, passage_title: str, question: str
+    gold_passage_map: Dict[str, DataPassage],
+    passage: DataPassage,
+    passage_title: str,
+    question: str,
+    tensorizer: Tensorizer,
 ):
     gold_info = gold_passage_map.get(question, None)
     if gold_info is not None:
-        is_from_gold_wiki_page = passage_title.lower() == gold_info.title.lower()
+        if gold_info.title is None:
+            gold_title = tensorizer.tensor_to_text(gold_info.title_token_ids)
+        else:
+            gold_title = gold_info.title
+        is_from_gold_wiki_page = passage_title.lower() == gold_title.lower()
     else:
         is_from_gold_wiki_page = False
 

@@ -74,7 +74,8 @@ class PreProcessor(object):
             num_workers=self.cfg.num_workers,
             debugging=self.debugging,
             load_data=False,
-            check_pre_tokenized_data=self.cfg.check_pre_tokenized_data
+            check_pre_tokenized_data=self.cfg.check_pre_tokenized_data,
+            cfg=self.cfg.preprocess_cfg,
         )
 
         dataset.load_data()

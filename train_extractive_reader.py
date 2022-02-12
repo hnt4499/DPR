@@ -117,40 +117,12 @@ class ReaderTrainer(object):
         offset: int = 0,
     ) -> ShardedDataIterator:
 
-        run_preprocessing = (
-            True
-            if self.distributed_factor == 1 or self.cfg.local_rank in [-1, 0]
-            else False
-        )
-
-        # Original, raw gold passages
-        gold_passages_src = self.cfg.gold_passages_src
-        if gold_passages_src:
-            if not is_train:
-                gold_passages_src = self.cfg.gold_passages_src_dev
-
-            assert os.path.exists(
-                gold_passages_src
-            ), "Please specify valid gold_passages_src/gold_passages_src_dev"
-
-        # Processed, 100-word split gold passages
-        gold_passages_processed = (self.cfg.gold_passages_processed if is_train
-                                   else self.cfg.gold_passages_processed_dev)
-
         if self.wiki_data is None:
             self.wiki_data = TokenizedWikipediaPassages(data_file=self.cfg.wiki_psgs_tokenized)
 
-        bm25_retrieval_results = self.cfg.bm25_retrieval_results if is_train else None
         dataset = ExtractiveReaderGeneralDataset(
-            path,
-            bm25_retrieval_results,
-            self.wiki_data,
-            is_train,
-            gold_passages_src,
-            gold_passages_processed,
-            self.tensorizer,
-            run_preprocessing,
-            self.cfg.num_workers,
+            file=path,
+            shuffle_positives=is_train,
             debugging=self.debugging,
         )
 

@@ -738,6 +738,9 @@ class FiDTensorizer:
         self.context_max_length = context_max_length
         self.answer_max_length = answer_max_length
 
+        self.eos_token_id = self.tokenizer.eos_token_id
+        self.eos_token_id_tensor = torch.tensor([self.eos_token_id])
+
     def encode(
         self,
         string: str,
@@ -745,6 +748,7 @@ class FiDTensorizer:
         padding: bool = True,
         truncation: bool = True,
         return_tensors: str = "pt",
+        add_special_tokens: bool = True,
     ):
         """
         Encode an abitrary string into ids.
@@ -764,6 +768,7 @@ class FiDTensorizer:
             padding=padding,
             truncation=truncation,
             return_tensors=return_tensors,
+            add_special_tokens=add_special_tokens,
         )
 
         assert len(ids) == 1
@@ -822,8 +827,9 @@ class FiDTensorizer:
         Encoder answer (target) string into token ids.
         """
         answer_ids = self.encode(
-            answer + " </s>",
+            answer,
             max_length=self.answer_max_length,
+            add_special_tokens=True,
         )
         answer_ids = self.to_max_length(answer_ids, max_length=self.answer_max_length)
         return answer_ids
@@ -835,7 +841,7 @@ class FiDTensorizer:
         answer_ids = self.to_tensor(answer_ids)
         answer_ids = torch.cat([
             answer_ids,
-            self.encode(" </s>", padding=False, truncation=False),
+            self.eos_token_id_tensor,
         ])
         answer_ids = self.to_max_length(answer_ids, max_length=self.answer_max_length)
         return answer_ids
@@ -853,6 +859,7 @@ class FiDTensorizer:
         concat_ids = self.encode(
             concat_str,
             max_length=self.context_max_length,
+            add_special_tokens=True,
         )
         concat_ids = self.to_max_length(concat_ids, max_length=self.context_max_length)
         return concat_ids
@@ -871,12 +878,13 @@ class FiDTensorizer:
             question, passage_title, passage
         )
         concat_ids = torch.cat([
-            self.encode("question: ", padding=False, truncation=False),
+            self.encode("question: ", padding=False, truncation=False, add_special_tokens=False),
             question,
-            self.encode("title: ", padding=False, truncation=False),
+            self.encode("title: ", padding=False, truncation=False, add_special_tokens=False),
             passage_title,
-            self.encode("context: ", padding=False, truncation=False),
+            self.encode("context: ", padding=False, truncation=False, add_special_tokens=False),
             passage,
+            self.eos_token_id_tensor,
         ])
         concat_ids = self.to_max_length(concat_ids, max_length=self.context_max_length)
         return concat_ids
@@ -896,8 +904,12 @@ class FiDTensorizer:
         pass
 
     def text_to_tensor(self, text, add_special_tokens: bool = False):
-        # Note that there is no "special tokens" for T5
-        return self.encode(text, padding=False, truncation=True)
+        return self.encode(
+            text,
+            padding=False,
+            truncation=True,
+            add_special_tokens=add_special_tokens,
+        )
 
     def tensor_to_text(self, tensor, skip_special_tokens: bool = True):
         return self.decode(tensor, skip_special_tokens)

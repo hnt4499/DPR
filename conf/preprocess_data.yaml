@@ -59,3 +59,7 @@ check_pre_tokenized_data: True
 
 # Debug
 debugging: False
+
+# Additional configs that overwrite the default ones
+# For description, see `general_data.py`
+preprocess_cfg: {}
