@@ -3,7 +3,7 @@ import glob
 import logging
 import os
 import random
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple, Union, Iterator
 
 import hydra
 import jsonlines
@@ -547,14 +547,16 @@ class OneForAllDataset(Dataset, GeneralDatasetScheme):
         encoder_type: str = None,
         only_gold: bool = False,
         debugging: bool =  False,
+        iterator_class: str = "ShardedDataIterator",
     ):
         """One-for-all dataset using general dataset scheme. This dataset can be used for retriever (by setting `mode=="retriever"`),
         reader (by setting `mode=="reader"`) for both (by setting `mode=="both"`).
         For now this data is implemented under `biencoder_data` for some backward compatibility reasons.
 
         :param file: either path to a single dataset file (*.json) or a glob pattern to preprocessed pickle (*.pkl) files.
-        :only_gold: whether to keep only samples whose gold passage is available. Useful for retriever dev set, since previously
+        :param only_gold: whether to keep only samples whose gold passage is available. Useful for retriever dev set, since previously
             all retriever data have gold passages. Data discrepancy could result in wrong selection of the best model during evaluation.
+        :else: see `dpr.data.GeneralDataset`.
         """
         super(OneForAllDataset, self).__init__(
             selector,
@@ -588,6 +590,7 @@ class OneForAllDataset(Dataset, GeneralDatasetScheme):
             num_workers=None,
             debugging=debugging,
             load_data=True,
+            iterator_class=iterator_class,
         )
 
     def load_data(self, wiki_data: TokenizedWikipediaPassages, tensorizer: Tensorizer):
@@ -609,13 +612,12 @@ class OneForAllDataset(Dataset, GeneralDatasetScheme):
     def __len__(self):
         return len(self.dataset)
 
-    def __getitem__(self, index) -> Union[
+    def _get_item_from_reader_sample(self, reader_sample) -> Union[
         BiEncoderSampleTokenized,  # `mode=="retriever"`
         ReaderSample,  # `mode=="reader`; note that `ReaderSample` is basically `DataSample`
         Tuple[BiEncoderSampleTokenized, ReaderSample]  # `mode=="both"`
     ]:
         # Reader sample is without any further pre-processing
-        reader_sample = self.dataset[index]
         if self.mode == "reader":
             return reader_sample
 
@@ -648,6 +650,21 @@ class OneForAllDataset(Dataset, GeneralDatasetScheme):
         if self.mode == "retriever":
             return retriever_sample
         return retriever_sample, reader_sample
+
+    def __getitem__(self, index) -> Union[
+        BiEncoderSampleTokenized,  # `mode=="retriever"`
+        ReaderSample,  # `mode=="reader`; note that `ReaderSample` is basically `DataSample`
+        Tuple[BiEncoderSampleTokenized, ReaderSample]  # `mode=="both"`
+    ]:
+        return self._get_item_from_reader_sample(self.dataset[index])
+
+    def __iter__(self) -> Iterator[Union[
+        BiEncoderSampleTokenized,  # `mode=="retriever"`
+        ReaderSample,  # `mode=="reader`; note that `ReaderSample` is basically `DataSample`
+        Tuple[BiEncoderSampleTokenized, ReaderSample]  # `mode=="both"`
+    ]]:
+        for reader_sample in self.dataset:
+            yield self._get_item_from_reader_sample(reader_sample)
 
 
 class BiEncoderGeneralDataset(OneForAllDataset):

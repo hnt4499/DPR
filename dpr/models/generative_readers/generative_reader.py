@@ -43,6 +43,28 @@ from ...data.data_types import (
 logger = logging.getLogger(__name__)
 
 
+class DotDict:
+    """
+    DotDict but without inheriting from dict itself. Helper to convert
+    dict-like output types (e.g., Seq2SeqLMOutput) to non-dict-like outputs
+    with exactly the same functionalities.
+    """
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    def __contains__(self, key):
+        return hasattr(self, key)
+
+    def __getitem__(self, key):
+        if not hasattr(self, key):
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def __setitem__(self, key, value):
+        setattr(self, key, value)
+
+
 class CustomT5Block(T5Block):
     """
     Custom T5 block that allows the use of pre-initialized T5 layers.
@@ -297,11 +319,31 @@ class FiDT5(T5ForConditionalGeneration):
         if attention_mask is not None:
             attention_mask = attention_mask.view(attention_mask.size(0), -1)
 
-        return super(FiDT5, self).forward(
+        # Somehow torch distributed causes OrderedDict turned into dict
+        # Without this, the process will fail at
+        # https://github.com/huggingface/transformers/blob/96d1cfb13db094d1468883060ec2d4471f63fd01/src/transformers/models/t5/modeling_t5.py#L1569
+        # where we try to index an OrderedDict-like object, which have already
+        # gotten turned into a plain python dictionary.
+        if (not self.training) and isinstance(kwargs["encoder_outputs"], dict) \
+                and "encoder_outputs" in kwargs:
+            kwargs["encoder_outputs"] = BaseModelOutputWithPastAndCrossAttentions(
+                **kwargs["encoder_outputs"])
+
+        outputs = super(FiDT5, self).forward(
             input_ids=input_ids,
             attention_mask=attention_mask,
             **kwargs,
         )
+
+        # Somehow torch distributed causes OrderedDict turned into dict
+        # Without this, the process will fail at
+        # https://github.com/huggingface/transformers/blob/96d1cfb13db094d1468883060ec2d4471f63fd01/src/transformers/generation_utils.py#L1303
+        # where we try to get an attribute from an OrderedDict-like object, which have already
+        # gotten turned into a plain python dictionary.
+        if (not self.training) and isinstance(outputs, dict) and \
+                "logits" in outputs:
+            outputs = DotDict(**outputs)
+        return outputs
 
     def generate(self, input_ids: T, attention_mask: T, max_length: int):
         assert input_ids.ndim == 3 and input_ids.shape[1] == self.num_passages

@@ -7,6 +7,7 @@ import json
 import glob
 import math
 import pickle
+import random
 import logging
 import collections
 import multiprocessing
@@ -24,6 +25,7 @@ from dpr.utils.data_utils import (
     DataPassageCompressor,
 )
 from dpr.data.answers_processing import get_expanded_answer
+from dpr.utils.misc_utils import count_lines_text_file
 
 logger = logging.getLogger()
 
@@ -101,6 +103,7 @@ class GeneralDataset(torch.utils.data.Dataset):
         check_pre_tokenized_data: bool = True,
         cfg: "PreprocessingCfg" = None,
         compress: bool = False,
+        iterator_class: str = "ShardedDataIterator",
     ):
         """Initialize general dataset.
 
@@ -121,6 +124,7 @@ class GeneralDataset(torch.utils.data.Dataset):
         :param cfg: configs to overwrite default preprocessing configs. Can be partially set (i.e., some key-value pairs
             may be set and some may not.)
         :param compress: whether to compress the outputs and save it as a *.json file.
+        :param iterator_class: data iterator class. Useful when reading a stream of data.
         """
         self.files = files
         self.bm25_retrieval_file = bm25_retrieval_file
@@ -138,11 +142,47 @@ class GeneralDataset(torch.utils.data.Dataset):
         self.cfg = cfg
         self.compress = compress
 
+        # Iterator class
+        allowed_iterator_class = ["ShardedDataIterator", "ShardedDataStreamIterator"]
+        if iterator_class not in allowed_iterator_class:
+            raise ValueError(
+                f"Invalid iterator class: {iterator_class}. Allowed classes are "
+                f"{allowed_iterator_class}"
+            )
+        self.iterator_class = iterator_class
+
     def __getitem__(self, index: int) -> DataSample:
+        if self.iterator_class != "ShardedDataIterator":
+            raise NotImplementedError
         return self.data[index]
 
     def __len__(self):
-        return len(self.data)
+        return self.num_samples
+
+    def __iter__(self):
+        """
+        Logic for compressed data files for memory efficiency. To be used
+        with `ShardedDataStreamIterator`.
+        """
+        if self.iterator_class != "ShardedDataStreamIterator":
+            raise NotImplementedError
+
+        # Hard code logic: always shuffle data files for randomness
+        indices = list(range(len(self.preprocessed_data_files)))
+        random.shuffle(indices)
+        preprocessed_data_files = [self.preprocessed_data_files[i] for i in indices]
+        num_samples_per_file = [self.num_samples_per_file[i] for i in indices]
+
+        # Read data
+        for path, num_samples in zip(preprocessed_data_files, num_samples_per_file):
+            logger.info(
+                f"[{self.__class__.__name__}] Start reading compressed data from {path} consisting of "
+                f"{num_samples} lines."
+            )
+            with open(path, "r") as fin:
+                for line in fin:
+                    datapoint = json.loads(line.strip())
+                    yield DataPassageCompressor.convert_from_json(datapoint)
 
     def load_data(self):
         if self.data is None:
@@ -157,7 +197,19 @@ class GeneralDataset(torch.utils.data.Dataset):
                     preprocessed_data_files = preprocessed_data_files[:2]
 
                 logger.info(f"Reading data files: {preprocessed_data_files}")
-                self.data = read_serialized_data_from_files(preprocessed_data_files)
+
+                # Compressed
+                if self.iterator_class == "ShardedDataIterator":
+                    self.data = read_serialized_data_from_files(preprocessed_data_files)
+                    self.num_samples = len(self.data)
+                elif self.iterator_class == "ShardedDataStreamIterator":
+                    self.preprocessed_data_files = preprocessed_data_files
+                    self.num_samples_per_file = [
+                        count_lines_text_file(path) for path in preprocessed_data_files
+                    ]
+                    self.num_samples = sum(self.num_samples_per_file)
+                else:
+                    raise NotImplementedError
 
     def _get_preprocessed_files(
         self,
@@ -859,6 +911,7 @@ def _find_answer_spans(
             _find_answer_positions(passage_token_ids_lowercased, answer_token_ids_lowercased)
             for answer_token_ids_lowercased in answers_token_ids_lowercased
         ]
+        answers_spans = list(filter(None, sum(answers_spans, [])))
 
     if len(answers_spans) == 0 and (warn_if_no_answer or raise_if_no_answer):
         passage_text = tensorizer.tensor_to_text(torch.from_numpy(ctx.passage_token_ids))

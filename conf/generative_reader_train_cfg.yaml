@@ -11,8 +11,14 @@ seed: 42
 # glob expression for train data files
 train_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-t5/train.json
 
+# Data iterator type
+train_iterator_class: ShardedDataIterator
+
 # glob expression for dev data files
 dev_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-t5/dev.json
+
+# Data iterator type
+dev_iterator_class: ShardedDataIterator
 
 # Entire tokenized Wikipedia passages (pkl format)
 wiki_psgs_tokenized: /data/tuyen/openqa/DPR/downloads/data/wikipedia_split_t5/psgs_w100_tokenized.pkl.*

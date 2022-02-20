@@ -30,8 +30,7 @@ from dpr.data.data_types import (
     DataPassage,
     DataSample,
 )
-from dpr.utils.dist_utils import gather, get_tqdm
-from dpr.utils.misc_utils import count_lines_text_file
+from dpr.utils.dist_utils import gather
 
 
 logger = logging.getLogger()
@@ -158,19 +157,9 @@ def read_serialized_data_from_files(paths: List[str]) -> List:
     results = []
     for path in paths:
         logger.info("Reading file %s", path)
-
-        if path.endswith(".json"):  # compressed one
-            tqdm = get_tqdm()
-            num_lines = count_lines_text_file(path)
-            with open(path, "r") as fin:
-                for line in tqdm(fin, total=num_lines):
-                    datapoint = DataPassageCompressor.convert_from_json(json.loads(line.strip()))
-                    results.append(datapoint)
-        else:
-            with open(path, "rb") as reader:
-                data = pickle.load(reader)
-            results.extend(data)
-
+        with open(path, "rb") as reader:
+            data = pickle.load(reader)
+        results.extend(data)
         logger.info("Aggregated data size: {}".format(len(results)))
     logger.info("Total data size: {}".format(len(results)))
     return results
@@ -252,8 +241,8 @@ class ShardedDataIterator(object):
         return self.iteration
 
     def apply(self, visitor_func: Callable):
-        for sample in self.data:
-            visitor_func(sample)
+        for i in range(len(self.data)):
+            visitor_func(self.data[i])
 
     def get_shard_indices(self, epoch: int):
         indices = list(range(len(self.data)))
@@ -880,3 +869,78 @@ class Tensorizer(object):
 
     def get_token_id(self, token: str) -> int:
         raise NotImplementedError
+
+
+class ShardedDataStreamIterator(object):
+    """
+    General purpose data iterator to be used for Pytorch's DDP mode where every node should handle its own part of
+    the data stream. This class aims at huge data stream that cannot be fit into
+    memory at the beginning.
+    """
+
+    def __init__(
+        self,
+        data: torch.utils.data.Dataset,
+        shard_id: int = 0,
+        num_shards: int = 1,
+        batch_size: int = 1,
+    ):
+
+        self.data = data
+        self.shards_num = max(num_shards, 1)
+        self.shard_id = max(shard_id, 0)
+        self.batch_size = batch_size
+        self.iteration = 0
+        self.apply_func = None  # to be set later
+
+        samples_per_shard = math.ceil(len(self.data) / self.shards_num)
+        self.max_iterations = math.ceil(samples_per_shard / batch_size)
+
+        logger.info(
+            f"[{ShardedDataStreamIterator}] samples_per_shard={samples_per_shard},"
+            f" max_iterations={self.max_iterations}",
+        )
+
+    def get_iteration(self) -> int:
+        return self.iteration
+
+    def apply(self, visitor_func: Callable):
+        assert self.apply_func is None, "`.apply()` should only be called once"
+        self.apply_func = visitor_func
+
+    def iterate_ds_data(self, epoch: int = 0) -> Iterator[List]:
+        assert self.iteration == 0
+        data_iterator = iter(self.data)
+
+        while True:
+            self.iteration += 1
+            items = []
+
+            try:
+                # Construct batch
+                for _ in range(self.batch_size):
+                    for _ in range(self.shard_id):
+                        next(data_iterator)
+                    item = next(data_iterator)
+                    if self.apply_func is not None:
+                        self.apply_func(item)
+                    items.append(item)
+                    for _ in range(self.shard_id + 1, self.shards_num):
+                        next(data_iterator)
+                yield items
+
+            except StopIteration:
+                if len(items) > 0:
+                    yield items
+
+                logger.info(
+                    "Finished iterating, iteration={}, shard={}".format(
+                        self.iteration, self.shard_id
+                    )
+                )
+                # reset the iteration status
+                self.iteration = 0
+                return
+
+    def get_dataset(self) -> torch.utils.data.Dataset:
+        return self.data
