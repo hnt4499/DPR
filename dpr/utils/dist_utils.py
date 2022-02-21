@@ -10,7 +10,7 @@ Utilities for distributed model training
 """
 
 import pickle
-from typing import List, Tuple
+from typing import List, Tuple, Any
 
 import torch
 import torch.distributed as dist
@@ -136,3 +136,18 @@ def get_tqdm():
         def do_nothing(x, *args, **kwargs):
             return x
         return do_nothing
+
+
+def broadcast_object(obj: Any = None):
+    """
+    Broadcase any arbitrary pickable object from the master process
+    to all other processes. The master process must call this function
+    with `obj` specified. Other processes must call this function
+    without any arguments.
+    """
+    if not dist.is_initialized():
+        return obj
+
+    obj = [obj]
+    torch.distributed.broadcast_object_list(obj, src=0)
+    return obj[0]

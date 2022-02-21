@@ -25,6 +25,7 @@ from dpr.utils.data_utils import (
     DataPassageCompressor,
 )
 from dpr.data.answers_processing import get_expanded_answer
+from dpr.utils.dist_utils import is_main_process, broadcast_object
 from dpr.utils.misc_utils import count_lines_text_file
 
 logger = logging.getLogger()
@@ -168,8 +169,12 @@ class GeneralDataset(torch.utils.data.Dataset):
             raise NotImplementedError
 
         # Hard code logic: always shuffle data files for randomness
-        indices = list(range(len(self.preprocessed_data_files)))
-        random.shuffle(indices)
+        if is_main_process():
+            indices = list(range(len(self.preprocessed_data_files)))
+            random.shuffle(indices)
+            broadcast_object(indices)
+        else:
+            indices = broadcast_object()
         preprocessed_data_files = [self.preprocessed_data_files[i] for i in indices]
         num_samples_per_file = [self.num_samples_per_file[i] for i in indices]
 
