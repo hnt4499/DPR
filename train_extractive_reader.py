@@ -106,7 +106,7 @@ class ReaderTrainer(object):
         self.best_validation_result = None
         self.best_cp_name = None
         if saved_state:
-            self._load_saved_state(saved_state)
+            self._load_saved_state(saved_state, resume=cfg.resume)
 
     def get_data_iterator(
         self,
@@ -455,24 +455,30 @@ class ReaderTrainer(object):
         torch.save(state._asdict(), cp)
         return cp
 
-    def _load_saved_state(self, saved_state: CheckpointState):
-        epoch = saved_state.epoch
-        offset = saved_state.offset
-        if offset == 0:  # epoch has been completed
-            epoch += 1
-        logger.info("Loading checkpoint @ batch=%s and epoch=%s", offset, epoch)
-        self.start_epoch = epoch
-        self.start_batch = offset
-
+    def _load_saved_state(self, saved_state: CheckpointState, resume: bool):
+        # Load model weights
         model_to_load = get_model_obj(self.reader)
         if saved_state.model_dict:
             logger.info("Loading model weights from saved state ...")
             model_to_load.load_state(saved_state)
 
-        logger.info("Loading saved optimizer state ...")
-        if saved_state.optimizer_dict:
-            self.optimizer.load_state_dict(saved_state.optimizer_dict)
-        self.scheduler_state = saved_state.scheduler_dict
+        if resume:
+            # Set training statistics (epoch and batch where it is left off)
+            epoch = saved_state.epoch
+            offset = saved_state.offset
+            if offset == 0:  # epoch has been completed
+                epoch += 1
+            logger.info("Loading checkpoint @ batch=%s and epoch=%s", offset, epoch)
+            self.start_epoch = epoch
+            self.start_batch = offset
+
+            # Load optimizer state
+            if saved_state.optimizer_dict:
+                logger.info("Loading saved optimizer state ...")
+                self.optimizer.load_state_dict(saved_state.optimizer_dict)
+
+            # Get scheduler state
+            self.scheduler_state = saved_state.scheduler_dict
 
     def _calc_loss(self, input: ReaderBatch) -> torch.Tensor:
         cfg = self.cfg
