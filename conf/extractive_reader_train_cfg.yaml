@@ -17,6 +17,9 @@ seed: 42
 # glob expression for train data files
 train_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new/train.json
 
+# Data iterator type
+train_iterator_class: ShardedDataIterator
+
 # File with the original train dataset passages (json format)
 gold_passages_src: /data/tuyen/openqa/DPR/downloads/data/gold_passages_info/nq_train.json
 
@@ -30,6 +33,9 @@ bm25_retrieval_results: /data/tuyen/openqa/DPR/downloads/data/retriever/nq-train
 
 # glob expression for dev data files
 dev_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new/dev.json
+
+# Data iterator type
+dev_iterator_class: ShardedDataIterator
 
 # File with the original dataset passages (json format)
 gold_passages_src_dev: /data/tuyen/openqa/DPR/downloads/data/gold_passages_info/nq_dev.json

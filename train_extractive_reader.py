@@ -47,6 +47,7 @@ from dpr.options import (
 )
 from dpr.utils.data_utils import (
     ShardedDataIterator,
+    ShardedDataStreamIterator,
 )
 from dpr.utils.model_utils import (
     get_schedule_linear,
@@ -110,6 +111,7 @@ class ReaderTrainer(object):
     def get_data_iterator(
         self,
         path: str,
+        iterator_class: str,
         batch_size: int,
         is_train: bool,
         shuffle=True,
@@ -124,19 +126,30 @@ class ReaderTrainer(object):
             file=path,
             shuffle_positives=is_train,
             debugging=self.debugging,
+            iterator_class=iterator_class,
         )
 
         dataset.load_data(wiki_data=self.wiki_data, tensorizer=self.tensorizer)
 
-        iterator = ShardedDataIterator(
-            dataset,
-            shard_id=self.shard_id,
-            num_shards=self.distributed_factor,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            shuffle_seed=shuffle_seed,
-            offset=offset,
-        )
+        if iterator_class == "ShardedDataIterator":
+            iterator = ShardedDataIterator(
+                dataset,
+                shard_id=self.shard_id,
+                num_shards=self.distributed_factor,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                shuffle_seed=shuffle_seed,
+                offset=offset,
+            )
+        elif iterator_class == "ShardedDataStreamIterator":
+            iterator = ShardedDataStreamIterator(
+                dataset,
+                shard_id=self.shard_id,
+                num_shards=self.distributed_factor,
+                batch_size=batch_size,
+            )
+        else:
+            raise NotImplementedError
 
         # apply deserialization hook
         iterator.apply(lambda sample: sample.on_deserialize())
@@ -147,6 +160,7 @@ class ReaderTrainer(object):
 
         train_iterator = self.get_data_iterator(
             cfg.train_files,
+            cfg.train_iterator_class,
             cfg.train.batch_size,
             True,
             shuffle=True,
@@ -219,7 +233,11 @@ class ReaderTrainer(object):
         self.reader.eval()
         if self.dev_iterator is None:
             self.dev_iterator = self.get_data_iterator(
-                cfg.dev_files, cfg.train.dev_batch_size, False, shuffle=False
+                cfg.dev_files,
+                cfg.dev_iterator_class,
+                cfg.train.dev_batch_size,
+                is_train=False,
+                shuffle=False,
             )
 
         log_result_step = cfg.train.log_batch_step // 4  # validation needs to be more verbose
