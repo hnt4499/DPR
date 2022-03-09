@@ -308,7 +308,7 @@ def create_reader_input(
         )
 
         if not sample_tensors:
-            logger.warning('No valid passages combination for question=%s ', sample.question)
+            # logger.warning('No valid passages combination for question=%s ', sample.question)
             continue
         context_ID, sample_input_ids, starts_tensor, ends_tensor, answer_mask = sample_tensors
 

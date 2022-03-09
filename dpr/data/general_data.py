@@ -191,16 +191,16 @@ class GeneralDataset(torch.utils.data.Dataset):
 
     def load_data(self):
         if self.data is None:
-            data_files = glob.glob(self.files)
-            if len(data_files) == 0:
-                raise RuntimeError("No data files found")
-            preprocessed_data_files = self._get_preprocessed_files(data_files)
+            # We break backward compatibility here: now we only allow specifying
+            # **unprocessed** data files (which may contains regex like ".*.json").
+            # That means specifying processed data files (e.g, "sth.*.pkl") won't
+            # work anymore
+            preprocessed_data_files = self._get_preprocessed_files([self.files])
 
             if self.load_data_:
                 if self.debugging:
                     logger.info("Debugging mode is on. Restricting to at most 2 data files.")
                     preprocessed_data_files = preprocessed_data_files[:2]
-
                 logger.info(f"Reading data files: {preprocessed_data_files}")
 
                 # Compressed
@@ -224,20 +224,17 @@ class GeneralDataset(torch.utils.data.Dataset):
         Get preprocessed data files, if exist, or generate new ones.
         """
 
-        serialized_files = [file for file in data_files if file.endswith(".pkl")]
-        if len(serialized_files) > 0:
-            return serialized_files
-        assert len(data_files) == 1, "Only 1 source file pre-processing is supported."
-
         # Data may have been serialized and cached before, try to find ones from same dir
         def _find_cached_files(path: str):
             dir_path, base_name = os.path.split(path)
             base_name = base_name.replace(".json", "")
             out_file_prefix = os.path.join(dir_path, base_name)
 
-            files = glob.glob(out_file_prefix + "*.pkl")
-            files_2 = glob.glob(out_file_prefix + ".preprocessed.*.json")  # for compressed data
-            return files + files_2, out_file_prefix
+            files = glob.glob(
+                out_file_prefix +
+                (".preprocessed.*.json" if self.compress else "*.pkl")
+            )
+            return files, out_file_prefix
 
         serialized_files, out_file_prefix = _find_cached_files(data_files[0])
         if len(serialized_files) > 0:
@@ -248,8 +245,6 @@ class GeneralDataset(torch.utils.data.Dataset):
         logger.info(
             "Data are not preprocessed for reader training. Start pre-processing ..."
         )
-
-        # Start pre-processing and save results
         if self.run_preprocessing:
             # Temporarily disable auto-padding to save disk space usage of serialized files
             self.tensorizer.set_pad_to_max(False)

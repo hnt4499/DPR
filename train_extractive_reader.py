@@ -483,7 +483,7 @@ class ReaderTrainer(object):
         if self.reader.training:
             # start_logits, end_logits, rank_logits = self.reader(input.input_ids, attn_mask)
             loss = self.reader(
-                input.input_ids,
+                input.input_ids.int(),
                 attn_mask,
                 input.start_positions,
                 input.end_positions,
