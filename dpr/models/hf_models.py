@@ -59,7 +59,7 @@ def get_bert_biencoder_components(cfg, inference_only: bool = False, **kwargs):
             learning_rate=cfg.train.learning_rate,
             adam_eps=cfg.train.adam_eps,
             weight_decay=cfg.train.weight_decay,
-            use_lamb=cfg.train.lamb,
+            use_lamb=cfg.train.get("lamb", False),
         )
         if not inference_only
         else None

@@ -944,3 +944,6 @@ class ShardedDataStreamIterator(object):
 
     def get_dataset(self) -> torch.utils.data.Dataset:
         return self.data
+
+    def get_max_iterations(self) -> int:
+        return self.max_iterations

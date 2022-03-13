@@ -127,6 +127,7 @@ class ReaderTrainer(object):
             shuffle_positives=is_train,
             debugging=self.debugging,
             iterator_class=iterator_class,
+            compress=self.cfg.compress and is_train,
         )
 
         dataset.load_data(wiki_data=self.wiki_data, tensorizer=self.tensorizer)
@@ -167,8 +168,6 @@ class ReaderTrainer(object):
             shuffle_seed=cfg.seed,
             offset=self.start_batch,
         )
-
-        # num_train_epochs = cfg.train.num_train_epochs - self.start_epoch
 
         logger.info("Total iterations per epoch=%d", train_iterator.max_iterations)
         updates_per_epoch = (

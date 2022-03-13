@@ -155,6 +155,7 @@ class ReaderTrainer(object):
             shuffle_positives=is_train,
             debugging=self.debugging,
             iterator_class=iterator_class,
+            compress=self.cfg.compress and is_train,
         )
         dataset.load_data(wiki_data=self.wiki_data, tensorizer=self.tensorizer)
 
@@ -358,13 +359,19 @@ class ReaderTrainer(object):
         f1s = np.mean(sum(f1s, []))
         logger.info(f"F1 {f1s * 100:.2f}")
 
-        if cfg.local_rank in [-1, 0] and cfg.prediction_results_file:
-            self._save_predictions(
-                cfg.prediction_results_file,
-                all_questions,
-                all_gold_answers,
-                all_predicted_answers,
+        if cfg.prediction_results_file:
+            # Gather from all GPUs
+            all_questions, all_gold_answers, all_predicted_answers = gather(
+                self.cfg,
+                [all_questions. all_gold_answers, all_predicted_answers],
             )
+            if self.cfg.local_rank in [-1, 0]:
+                self._save_predictions(
+                    cfg.prediction_results_file,
+                    sum(all_questions, []),
+                    sum(all_gold_answers, []),
+                    sum(all_predicted_answers, []),
+                )
 
         reader_model.set_num_passages(cfg.passages_per_question)
         return em

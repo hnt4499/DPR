@@ -400,7 +400,6 @@ class OneForAllTrainer(object):
         total_loss = 0.0
         start_time = time.time()
         total_correct_predictions = 0
-        log_result_step = cfg.train.log_batch_step
         batches = 0
         dataset = 0
 
@@ -464,7 +463,7 @@ class OneForAllTrainer(object):
             total_loss += loss.item()
             total_correct_predictions += correct_cnt
             batches += 1
-            if (i + 1) % log_result_step == 0:
+            if (i + 1) % cfg.train.log_batch_step == 0:
                 logger.info(
                     "Retriever NLL: Eval step: %d , used_time=%f sec., loss=%f ",
                     i,

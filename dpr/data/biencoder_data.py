@@ -548,6 +548,7 @@ class OneForAllDataset(Dataset, GeneralDatasetScheme):
         only_gold: bool = False,
         debugging: bool =  False,
         iterator_class: str = "ShardedDataIterator",
+        compress: bool = False,
     ):
         """One-for-all dataset using general dataset scheme. This dataset can be used for retriever (by setting `mode=="retriever"`),
         reader (by setting `mode=="reader"`) for both (by setting `mode=="both"`).
@@ -591,6 +592,7 @@ class OneForAllDataset(Dataset, GeneralDatasetScheme):
             debugging=debugging,
             load_data=True,
             iterator_class=iterator_class,
+            compress=compress,
         )
 
     def load_data(self, wiki_data: TokenizedWikipediaPassages, tensorizer: Tensorizer):

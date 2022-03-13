@@ -17,6 +17,7 @@ seed: 42
 
 # glob expression for train data files
 train_files: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new/train.json
+compress: False
 
 # Data iterator type
 train_iterator_class: ShardedDataIterator
