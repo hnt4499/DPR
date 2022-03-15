@@ -95,8 +95,8 @@ class Reader(nn.Module):
 
         return start_logits, end_logits, rank_logits
 
-    def load_state(self, saved_state: CheckpointState):
-        load_state_dict_to_model(self, saved_state.model_dict)
+    def load_state(self, saved_state: CheckpointState, strict: bool = True):
+        load_state_dict_to_model(self, saved_state.model_dict, strict=strict)
 
 
 class InterPassageReader(Reader):

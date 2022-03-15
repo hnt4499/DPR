@@ -28,12 +28,15 @@ NQ_LICENSE_FILES = [
 ]
 
 RESOURCES_MAP = {
+    # Wiki 100-word split
     "data.wikipedia_split.psgs_w100": {
         "s3_url": "https://dl.fbaipublicfiles.com/dpr/wikipedia_split/psgs_w100.tsv.gz",
         "original_ext": ".tsv",
         "compressed": True,
         "desc": "Entire wikipedia passages set obtain by splitting all pages into 100-word segments (no overlap)",
     },
+
+    # Retriever data
     "data.retriever.nq-dev": {
         "s3_url": "https://dl.fbaipublicfiles.com/dpr/data/retriever/biencoder-nq-dev.json.gz",
         "original_ext": ".json",
@@ -100,7 +103,6 @@ RESOURCES_MAP = {
         "desc": "NQ train subset for Retriever validation and IR results generation",
         "license_files": NQ_LICENSE_FILES,
     },
-    #
     "data.retriever.qas.trivia-dev": {
         "s3_url": "https://dl.fbaipublicfiles.com/dpr/data/retriever/trivia-dev.qa.csv.gz",
         "original_ext": ".csv",
@@ -125,6 +127,8 @@ RESOURCES_MAP = {
         "compressed": False,
         "desc": "Trivia test subset for Retriever validation and IR results generation",
     },
+
+    # Gold passages
     "data.gold_passages_info.nq_train": {
         "s3_url": "https://dl.fbaipublicfiles.com/dpr/data/nq_gold_info/nq-train_gold_info.json.gz",
         "original_ext": ".json",
@@ -147,6 +151,8 @@ RESOURCES_MAP = {
         "tokenization",
         "license_files": NQ_LICENSE_FILES,
     },
+
+    # ???
     "pretrained.fairseq.roberta-base.dict": {
         "s3_url": "https://dl.fbaipublicfiles.com/dpr/pretrained/fairseq/roberta/dict.txt",
         "original_ext": ".txt",
@@ -165,6 +171,8 @@ RESOURCES_MAP = {
         "compressed": False,
         "desc": "Weights for pretrained pytext bert base model",
     },
+
+    # Retriever results
     "data.retriever_results.nq.single.wikipedia_passages": {
         "s3_url": [
             "https://dl.fbaipublicfiles.com/dpr/data/wiki_encoded/single/nq/wiki_passages_{}".format(
@@ -217,6 +225,8 @@ RESOURCES_MAP = {
         "desc": "Retrieval results of NQ test dataset for the encoder trained on NQ + adversarial hard negatives",
         "license_files": NQ_LICENSE_FILES,
     },
+
+    # Retriever checkpoints
     "checkpoint.retriever.single.nq.bert-base-encoder": {
         "s3_url": "https://dl.fbaipublicfiles.com/dpr/checkpoint/retriever/single/nq/hf_bert_base.cp",
         "original_ext": ".cp",
@@ -236,6 +246,8 @@ RESOURCES_MAP = {
         "desc": "Biencoder weights trained on the original DPR NQ data combined with adversarial hard negatives (See data.retriever.nq-adv-hn-train resource). "
         "The model is HF bert-base-uncased",
     },
+
+    # Reader data
     "data.reader.nq.single.train": {
         "s3_url": [
             "https://dl.fbaipublicfiles.com/dpr/data/reader/nq/single/train.{}.pkl".format(
@@ -288,6 +300,8 @@ RESOURCES_MAP = {
         "desc": "Reader model Trivia test dataset input data preprocessed from hybrid retriever results "
         "(where dense part is trained on multiset)",
     },
+
+    # Reader checkpoints
     "checkpoint.reader.nq-single.hf-bert-base": {
         "s3_url": "https://dl.fbaipublicfiles.com/dpr/checkpoint/reader/nq-single/hf_bert_base.cp",
         "original_ext": ".cp",

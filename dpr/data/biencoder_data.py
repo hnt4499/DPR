@@ -574,8 +574,10 @@ class OneForAllDataset(Dataset, GeneralDatasetScheme):
         self.only_gold = only_gold
 
         # Data should already be pre-processed
-        pickle_files = glob.glob(file.replace(".json", "") + ".*.pkl")
-        pickle_files += glob.glob(file.replace(".json", "") + ".preprocessed.*.json")
+        pickle_files = glob.glob(
+            file.replace(".json", "") +
+            (".preprocessed.*.json" if compress else ".*.pkl")
+        )
         assert len(pickle_files) > 0, "Data should be already processed"
 
         # Initialize general dataset

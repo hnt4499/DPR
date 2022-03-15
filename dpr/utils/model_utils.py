@@ -209,18 +209,30 @@ def load_states_from_checkpoint_ofa(model_file: str) -> CheckpointStateOFA:
     return CheckpointStateOFA(**state_dict)
 
 
-def load_state_dict_to_model(model: nn.Module, state_dict: dict):
+def load_state_dict_to_model(
+    model: nn.Module,
+    state_dict: dict,
+    strict: bool = False,
+):
     model_keys = set(model.state_dict().keys())
     pretrained_model_keys = set(state_dict.keys())
 
     # Check validity
     keys_redundant = pretrained_model_keys - model_keys
     if len(keys_redundant) > 0:
-        logger.warn(f"Redundant keys detected in the pre-trained state dict: {list(keys_redundant)}.")
+        to_log = f"Redundant keys detected in the pre-trained state dict: {list(keys_redundant)}."
+        if strict:
+            raise KeyError(to_log)
+        else:
+            logger.warn()
 
     keys_missing = model_keys - pretrained_model_keys
     if len(keys_missing) > 0:
-        logger.warn(f"Missing keys detected in the pretrained state dict: {list(keys_missing)}.")
+        to_log = f"Missing keys detected in the pretrained state dict: {list(keys_missing)}."
+        if strict:
+            raise KeyError(to_log)
+        else:
+            logger.warn()
 
     # Remove redundant params
     for key_redundant in keys_redundant:
@@ -236,4 +248,4 @@ def load_state_dict_to_model(model: nn.Module, state_dict: dict):
     logger.info(f"Loading {param_count} parameters to the model...")
 
     # Load
-    model.load_state_dict(state_dict, strict=False)
+    model.load_state_dict(state_dict, strict=strict)
