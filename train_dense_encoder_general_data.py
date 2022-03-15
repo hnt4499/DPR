@@ -89,7 +89,7 @@ class BiEncoderTrainer(object):
         model_file = get_model_file(cfg, cfg.checkpoint_file_name)
         saved_state = None
         if model_file:
-            saved_state = load_states_from_checkpoint(model_file, resume=cfg.resume)
+            saved_state = load_states_from_checkpoint(model_file)
             set_cfg_params_from_state(saved_state.encoder_params, cfg)
 
         gradient_checkpointing = getattr(cfg, "gradient_checkpointing", False)
@@ -120,7 +120,7 @@ class BiEncoderTrainer(object):
         self.loss_function = init_loss(cfg.encoder.encoder_model_type, cfg)
 
         if saved_state:
-            self._load_saved_state(saved_state)
+            self._load_saved_state(saved_state, resume=cfg.resume)
 
         self.dev_iterator = None
         self.wiki_data = None
@@ -523,8 +523,6 @@ class BiEncoderTrainer(object):
             )
 
             # get the token to be used for representation selection
-            from dpr.data.biencoder_data import DEFAULT_SELECTOR
-
             rep_positions_q = self.dataset.selector.get_positions(
                 biencoder_batch.question_ids, self.tensorizer, self.biencoder
             )
@@ -628,7 +626,6 @@ class BiEncoderTrainer(object):
             meta_params,
         )
         torch.save(state._asdict(), cp)
-        logger.info("Saved checkpoint at %s", cp)
         return cp
 
     def _load_saved_state(self, saved_state: CheckpointState, resume: bool):
@@ -646,8 +643,7 @@ class BiEncoderTrainer(object):
             logger.info("Loading checkpoint @ batch=%s and epoch=%s", offset, epoch)
 
             self.start_epoch = epoch
-            # TODO: offset doesn't work for multiset currently
-            self.start_batch = 0  # offset
+            self.start_batch = offset
 
             if saved_state.optimizer_dict:
                 logger.info("Loading saved optimizer state ...")
@@ -676,7 +672,7 @@ def _do_biencoder_fwd_pass(
 
     if model.training:
         model_out = model(
-            input.question_ids,
+            input.question_ids.int(),
             input.question_segments,
             q_attn_mask,
             input.context_ids,

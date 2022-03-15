@@ -10,15 +10,13 @@
  Pipeline to train the reader model on top of the retriever results
 """
 
+import os
 import sys
 import yaml
+import logging
 
 import hydra
-import logging
-import os
-
 from omegaconf import DictConfig
-
 
 from dpr.data.general_data import GeneralDataset, TokenizedWikipediaPassages
 from dpr.models import init_tenzorizer
@@ -46,22 +44,21 @@ class PreProcessor(object):
         self,
         path: str,
         is_train: bool,
+        gold_passages_src: str,
+        gold_passages_processed: str,
+        bm25_retrieval_results: str,
     ) -> None:
 
-        # Original, raw gold passages
-        gold_passages_src = self.cfg.gold_passages_src
-        if gold_passages_src:
-            if not is_train:
-                gold_passages_src = self.cfg.gold_passages_src_dev
-
-        # Processed, 100-word split gold passages
-        gold_passages_processed = (self.cfg.gold_passages_processed if is_train
-                                   else self.cfg.gold_passages_processed_dev)
-
+        # Load wiki data
         if self.wiki_data is None:
-            self.wiki_data = TokenizedWikipediaPassages(data_file=self.cfg.wiki_psgs_tokenized)
+            self.wiki_data = TokenizedWikipediaPassages(
+                data_file=self.cfg.wiki_psgs_tokenized)
 
-        bm25_retrieval_results = self.cfg.bm25_retrieval_results if is_train else None
+        if path is None:
+            logger.info(f"Path is not specified for `is_train={is_train}`. Skipping")
+            return
+
+        # Preprocess
         dataset = GeneralDataset(
             files=path,
             bm25_retrieval_file=bm25_retrieval_results,
@@ -77,18 +74,29 @@ class PreProcessor(object):
             check_pre_tokenized_data=self.cfg.check_pre_tokenized_data,
             cfg=self.cfg.preprocess_cfg,
         )
-
         dataset.load_data()
 
     def load_data(self):
         # Load train data
-        self.get_data_iterator(self.cfg.train_files, is_train=True)
+        self.get_data_iterator(
+            self.cfg.train_files,
+            is_train=True,
+            gold_passages_src=self.cfg.gold_passages_src,
+            gold_passages_processed=self.cfg.gold_passages_processed,
+            bm25_retrieval_results=self.cfg.bm25_retrieval_results,
+        )
 
         # Temporarily remove Wikipedia passages to avoid too much data being transferred in multiprocessing
         self.wiki_data.remove_data()
 
         # Load dev data
-        self.get_data_iterator(self.cfg.dev_files, is_train=False)
+        self.get_data_iterator(
+            self.cfg.dev_files,
+            is_train=False,
+            gold_passages_src=self.cfg.gold_passages_src_dev,
+            gold_passages_processed=self.cfg.gold_passages_processed_dev,
+            bm25_retrieval_results=None,
+        )
 
 
 @hydra.main(config_path="conf", config_name="preprocess_data")

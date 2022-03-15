@@ -172,9 +172,9 @@ class BiEncoder(nn.Module):
                 shuffle=shuffle,
                 shuffle_positives=shuffle_positives,
                 hard_neg_fallback=hard_neg_fallback,
-                query_token=query_token
+                query_token=query_token,
             )
-        else:
+        elif isinstance(samples[0], BiEncoderSampleTokenized):
             return cls.create_biencoder_input_tokenized(
                 samples=samples,
                 tensorizer=tensorizer,
@@ -184,8 +184,11 @@ class BiEncoder(nn.Module):
                 shuffle=shuffle,
                 shuffle_positives=shuffle_positives,
                 hard_neg_fallback=hard_neg_fallback,
-                query_token=query_token
+                query_token=query_token,
             )
+        else:
+            raise NotImplementedError(
+                f"Invalid sample type: {samples[0].__class__.__name__}")
 
     @classmethod
     def create_biencoder_input_non_tokenized(

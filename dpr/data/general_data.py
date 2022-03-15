@@ -292,7 +292,6 @@ def preprocess_retriever_results(
     tensorizer: Tensorizer,
     check_pre_tokenized_data: bool = True,
     num_workers: int = 8,
-    double_check: bool = True,
     debugging: bool = False,
     cfg: "PreprocessingCfg" = None,
     compress: bool = False,
@@ -315,7 +314,6 @@ def preprocess_retriever_results(
     :param check_pre_tokenized_data: whether to check if the pre-tokenized context data is the same as original
         context passage after tokenized.
     :param num_workers: the number of parallel processes for conversion
-    :param double_check: double check whether the pre-tokenized tokens are correct
     :param cfg: configs to overwrite default preprocessing configs.
     :param compress: whether to compress the outputs and save it as a *.json file.
     :return: path to serialized, preprocessed pickle files
@@ -353,7 +351,7 @@ def preprocess_retriever_results(
 
     # We only keep first 1000 passage texts of each chunk for double checking
     logger.info("Releasing memory...")
-    c = 1000 if double_check else 0
+    c = 1000 if check_pre_tokenized_data else 0
     for _, samples, _ in chunks:
         if c >= len(samples):
             continue
@@ -526,6 +524,8 @@ def _preprocess_retriever_data(
         match with the original gold passages.
     :param tensorizer: Tensorizer object for text to model input tensors conversions
     :param cfg: PreprocessingCfg object with positive and negative passage selection parameters
+    :param check_pre_tokenized_data: whether to check if the pre-tokenized context data is the same as original
+        context passage after tokenized.
     :param is_train_set: if the data should be processed as a train set
     :return: iterable of DataSample objects which can be consumed by the reader model
     """
