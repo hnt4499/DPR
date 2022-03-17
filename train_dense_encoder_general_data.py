@@ -119,6 +119,7 @@ class BiEncoderTrainer(object):
         self.cfg = cfg
         self.loss_function = init_loss(cfg.encoder.encoder_model_type, cfg)
 
+        self.model_file = model_file
         if saved_state:
             self._load_saved_state(saved_state, resume=cfg.resume)
 
@@ -165,7 +166,13 @@ class BiEncoderTrainer(object):
                 shard_id=self.shard_id,
                 num_shards=self.distributed_factor,
                 batch_size=batch_size,
+                offset=0,
             )
+            if offset > 0:
+                updates_per_epoch = iterator.max_iterations // \
+                    self.cfg.train.gradient_accumulation_steps
+                global_step = self.start_epoch * updates_per_epoch + self.start_batch
+                iterator.set_offset(global_step)  # offset of this iterator is global step
         else:
             raise NotImplementedError
 
@@ -216,6 +223,13 @@ class BiEncoderTrainer(object):
                 self.optimizer, warmup_steps, total_updates
             )
 
+        # Eval before any training, but no checkpointing
+        if self.model_file is not None and self.cfg.eval_first:
+            logger.info("Evaluate loaded model before any training...")
+            self.validate_and_save(
+                self.start_epoch, iteration=None, scheduler=None, save_cp=False,
+            )
+
         eval_step = math.ceil(updates_per_epoch / cfg.train.eval_per_epoch)
         logger.info("  Eval step = %d", eval_step)
         logger.info("***** Training *****")
@@ -229,10 +243,10 @@ class BiEncoderTrainer(object):
                 "Training finished. Best validation checkpoint %s", self.best_cp_name
             )
 
-    def validate_and_save(self, epoch: int, iteration: int, scheduler):
+    def validate_and_save(self, epoch: int, iteration: int, scheduler, save_cp: bool = True):
         cfg = self.cfg
         # for distributed mode, save checkpoint for only one process
-        save_cp = cfg.local_rank in [-1, 0]
+        save_cp = save_cp and cfg.local_rank in [-1, 0]
 
         if epoch == cfg.val_av_rank_start_epoch:
             self.best_validation_result = None
@@ -549,7 +563,6 @@ class BiEncoderTrainer(object):
 
             if cfg.fp16:
                 from apex import amp
-
                 with amp.scale_loss(loss, self.optimizer) as scaled_loss:
                     scaled_loss.backward()
                 if cfg.train.max_grad_norm > 0:
@@ -588,6 +601,13 @@ class BiEncoderTrainer(object):
                     latest_rolling_train_av_loss,
                 )
                 rolling_train_loss = 0.0
+
+            # Also log the first batch if resuming from a checkpoint to see
+            # if the loss value is normal
+            if self.model_file is not None and i == 0:
+                logger.info(
+                    f"Avg. loss per last 1 batches: {rolling_train_loss}",
+                )
 
             if data_iteration % eval_step == 0:
                 logger.info(

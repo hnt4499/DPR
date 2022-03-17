@@ -6,6 +6,9 @@ defaults:
 # A trained reader checkpoint file to initialize the model
 model_file:
 seed: 42
+# These configs are only applicable when `model_file` is specified
+resume: True  # whether to resume training
+eval_first: True  # whether to evaluate the loaded model straightaway before any training
 
 
 # glob expression for train data files

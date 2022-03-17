@@ -105,6 +105,8 @@ class ReaderTrainer(object):
         self.scheduler_state = None
         self.best_validation_result = None
         self.best_cp_name = None
+
+        self.model_file = model_file
         if saved_state:
             self._load_saved_state(saved_state, resume=cfg.resume)
 
@@ -148,7 +150,13 @@ class ReaderTrainer(object):
                 shard_id=self.shard_id,
                 num_shards=self.distributed_factor,
                 batch_size=batch_size,
+                offset=0,
             )
+            if offset > 0:
+                updates_per_epoch = iterator.max_iterations // \
+                    self.cfg.train.gradient_accumulation_steps
+                global_step = self.start_epoch * updates_per_epoch + self.start_batch
+                iterator.set_offset(global_step)  # offset of this iterator is global step
         else:
             raise NotImplementedError
 
@@ -191,6 +199,13 @@ class ReaderTrainer(object):
         else:
             scheduler = get_schedule_linear(self.optimizer, warmup_steps, total_updates)
 
+        # Eval before any training, but no checkpointing
+        if self.model_file is not None and self.cfg.eval_first:
+            logger.info("Evaluate loaded model before any training...")
+            self.validate_and_save(
+                self.start_epoch, iteration=None, scheduler=None, save_cp=False,
+            )
+
         eval_step = cfg.train.eval_step
         logger.info("  Eval step = %d", eval_step)
         logger.info("***** Training *****")
@@ -210,10 +225,10 @@ class ReaderTrainer(object):
 
         return
 
-    def validate_and_save(self, epoch: int, iteration: int, scheduler):
+    def validate_and_save(self, epoch: int, iteration: int, scheduler, save_cp: bool = False):
         cfg = self.cfg
         # in distributed DDP mode, save checkpoint for only one process
-        save_cp = cfg.local_rank in [-1, 0]
+        save_cp = save_cp and cfg.local_rank in [-1, 0]
         reader_validation_score = self.validate()
 
         if save_cp:
@@ -413,6 +428,13 @@ class ReaderTrainer(object):
                     latest_rolling_train_av_loss,
                 )
                 rolling_train_loss = 0.0
+
+            # Also log the first batch if resuming from a checkpoint to see
+            # if the loss value is normal
+            if self.model_file is not None and i == 0:
+                logger.info(
+                    f"Avg. loss per last 1 batches: {rolling_train_loss}",
+                )
 
             if global_step % eval_step == 0:
                 logger.info(

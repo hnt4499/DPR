@@ -884,6 +884,7 @@ class ShardedDataStreamIterator(object):
         shard_id: int = 0,
         num_shards: int = 1,
         batch_size: int = 1,
+        offset: int = 0,
     ):
 
         self.data = data
@@ -891,6 +892,7 @@ class ShardedDataStreamIterator(object):
         self.shard_id = max(shard_id, 0)
         self.batch_size = batch_size
         self.iteration = 0
+        self.offset = offset
         self.apply_func = None  # to be set later
 
         samples_per_shard = math.ceil(len(self.data) / self.shards_num)
@@ -900,6 +902,11 @@ class ShardedDataStreamIterator(object):
             f"[{ShardedDataStreamIterator}] samples_per_shard={samples_per_shard},"
             f" max_iterations={self.max_iterations}",
         )
+
+    def set_offset(self, offset: int):
+        """Lazy offset setter"""
+        assert self.offset == 0
+        self.offset = offset
 
     def get_iteration(self) -> int:
         return self.iteration
@@ -911,6 +918,32 @@ class ShardedDataStreamIterator(object):
     def iterate_ds_data(self, epoch: int = 0) -> Iterator[List]:
         assert self.iteration == 0
         data_iterator = iter(self.data)
+
+        # If offset > 0, virtually iterate over data for resumability
+        if self.offset > 0:
+            logger.info(
+                f"Found offset={self.offset}. Virtually iterating over data "
+                f"for as many iterations for resumability..."
+            )
+
+            # A workaround to make resuming much faster
+            from dpr.data.general_data import GeneralDataset
+            GeneralDataset._data_post_processing = False
+            from dpr.data.biencoder_data import OneForAllDataset
+            OneForAllDataset._data_post_processing = False
+
+            for _ in range(self.offset):
+                self.iteration += 1
+                try:
+                    for _ in range(self.batch_size * self.shards_num):
+                        next(data_iterator)
+                except StopIteration:
+                    data_iterator = iter(self.data)
+                    self.iteration = 0
+
+            self.offset = 0  # remove offset
+            GeneralDataset._data_post_processing = True
+            OneForAllDataset._data_post_processing = True
 
         while True:
             self.iteration += 1
@@ -934,9 +967,8 @@ class ShardedDataStreamIterator(object):
                     yield items
 
                 logger.info(
-                    "Finished iterating, iteration={}, shard={}".format(
-                        self.iteration, self.shard_id
-                    )
+                    f"Finished iterating, iteration={self.iteration}, "
+                    f"shard={self.shard_id}"
                 )
                 # reset the iteration status
                 self.iteration = 0

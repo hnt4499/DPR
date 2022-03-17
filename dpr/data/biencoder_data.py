@@ -537,6 +537,10 @@ class JsonQADatasetWithAllPassages(JsonQADataset):
 
 
 class OneForAllDataset(Dataset, GeneralDatasetScheme):
+    # Set to False to disable data post processing; a workaround in
+    # `dpr.data.data_utils.ShardedDataStreamIterator` for resumability
+    _data_post_processing = True
+
     def __init__(
         self,
         mode: str,
@@ -622,7 +626,7 @@ class OneForAllDataset(Dataset, GeneralDatasetScheme):
         Tuple[BiEncoderSampleTokenized, ReaderSample]  # `mode=="both"`
     ]:
         # Reader sample is without any further pre-processing
-        if self.mode == "reader":
+        if self.mode == "reader" or not OneForAllDataset._data_post_processing:
             return reader_sample
 
         # Retriever sample needs further pre-processing for backward compatibility

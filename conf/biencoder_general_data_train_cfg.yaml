@@ -36,8 +36,10 @@ seed: 12345
 
 # A trained bi-encoder checkpoint file to initialize the model
 model_file:
-resume: True  # whether to resume training; only applicable when `model_file` is specified
-ignore_pretrained_model_type: false
+# These configs are only applicable when `model_file` is specified
+resume: True  # whether to resume training
+eval_first: True  # whether to evaluate the loaded model straightaway before any training
+ignore_pretrained_model_type: False
 
 # TODO: move to a conf group
 # local_rank for distributed training on gpus

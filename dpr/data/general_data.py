@@ -88,6 +88,10 @@ class GeneralDataset(torch.utils.data.Dataset):
     General-purpose dataset for both retriever (biencoder) and reader. Input data is expected to be output of a
     trained retriever. This serves as a preprocessor as well as a container, to be wrapper by other classes.
     """
+    # Set to False to disable data post processing; a workaround in
+    # `dpr.data.data_utils.ShardedDataStreamIterator` for resumability
+    _data_post_processing = True
+
     def __init__(
         self,
         files: str,
@@ -181,13 +185,16 @@ class GeneralDataset(torch.utils.data.Dataset):
         # Read data
         for path, num_samples in zip(preprocessed_data_files, num_samples_per_file):
             logger.info(
-                f"[{self.__class__.__name__}] Start reading compressed data from {path} consisting of "
-                f"{num_samples} lines."
+                f"[{self.__class__.__name__}] Start reading compressed data "
+                f"from {path} consisting of {num_samples} lines."
             )
             with open(path, "r") as fin:
                 for line in fin:
-                    datapoint = json.loads(line.strip())
-                    yield DataPassageCompressor.convert_from_json(datapoint)
+                    if GeneralDataset._data_post_processing:
+                        datapoint = json.loads(line.strip())
+                        yield DataPassageCompressor.convert_from_json(datapoint)
+                    else:
+                        yield line  # save time when resuming
 
     def load_data(self):
         if self.data is None:

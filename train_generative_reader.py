@@ -72,14 +72,14 @@ class ReaderTrainer(object):
 
         logger.info("***** Initializing components for training *****")
 
-        model_file = get_model_file(self.cfg, self.cfg.checkpoint_file_name)
+        model_file = get_model_file(cfg, cfg.checkpoint_file_name)
         if model_file is None:
             saved_state = None
         else:
             saved_state = load_states_from_checkpoint(model_file)
             set_generative_reader_cfg_params_from_state(saved_state.encoder_params, cfg)
 
-        gradient_checkpointing = self.cfg.gradient_checkpointing
+        gradient_checkpointing = cfg.gradient_checkpointing
         tensorizer, reader, optimizer = init_generative_reader_components(
             cfg.encoder.encoder_model_type,
             cfg,
@@ -101,40 +101,43 @@ class ReaderTrainer(object):
         self.reader: FiDT5 = reader
         self.optimizer = optimizer
         self.tensorizer = tensorizer
-        self._load_saved_state(saved_state)
+        self.model_file = model_file
+        self._load_saved_state(saved_state, resume=cfg.resume)
 
-        self.debugging = self.cfg.debugging
+        self.debugging = cfg.debugging
         self.wiki_data = None
         self.dev_iterator = None
         self.best_validation_result = None
         self.best_cp_name = None
 
-    def _load_saved_state(self, saved_state: CheckpointState):
+    def _load_saved_state(self, saved_state: CheckpointState, resume: bool = True):
         if saved_state is None:
             self.scheduler_state = None
             self.start_epoch = 0
             self.start_batch = 0
             return
 
-        epoch = saved_state.epoch
-        offset = saved_state.offset
-        if offset == 0:  # epoch has been completed
-            epoch += 1
-        logger.info(
-            f"Loading checkpoint @ epoch={epoch} and local iteration={offset}"
-        )
-        self.start_epoch = epoch
-        self.start_batch = offset
-
+        # Load model weights
         model_to_load: FiDT5 = get_model_obj(self.reader)
         if saved_state.model_dict:
             logger.info("Loading model weights from saved state ...")
             model_to_load.load_state(saved_state.model_dict)
 
-        if saved_state.optimizer_dict:
-            logger.info("Loading saved optimizer state ...")
-            self.optimizer.load_state_dict(saved_state.optimizer_dict)
-        self.scheduler_state = saved_state.scheduler_dict
+        if resume:
+            epoch = saved_state.epoch
+            offset = saved_state.offset
+            if offset == 0:  # epoch has been completed
+                epoch += 1
+            logger.info(
+                f"Loading checkpoint @ epoch={epoch} and local iteration={offset}"
+            )
+            self.start_epoch = epoch
+            self.start_batch = offset
+
+            if saved_state.optimizer_dict:
+                logger.info("Loading saved optimizer state ...")
+                self.optimizer.load_state_dict(saved_state.optimizer_dict)
+            self.scheduler_state = saved_state.scheduler_dict
 
     def get_data_iterator(
         self,
@@ -175,7 +178,13 @@ class ReaderTrainer(object):
                 shard_id=self.shard_id,
                 num_shards=self.distributed_factor,
                 batch_size=batch_size,
+                offset=0,
             )
+            if offset > 0:
+                updates_per_epoch = iterator.max_iterations // \
+                    self.cfg.train.gradient_accumulation_steps
+                global_step = self.start_epoch * updates_per_epoch + self.start_batch
+                iterator.set_offset(global_step)  # offset of this iterator is global step
         else:
             raise NotImplementedError
 
@@ -223,12 +232,18 @@ class ReaderTrainer(object):
         else:
             scheduler = get_schedule_linear(self.optimizer, warmup_steps, total_updates)
 
+        # Eval before any training, but no checkpointing
+        if self.model_file is not None and self.cfg.eval_first:
+            logger.info("Evaluate loaded model before any training...")
+            self.validate_and_save(
+                self.start_epoch, iteration=None, scheduler=None, save_cp=False,
+            )
+
         eval_step = cfg.train.eval_step
         logger.info("  Eval step = %d", eval_step)
         logger.info("***** Training *****")
 
         global_step = self.start_epoch * updates_per_epoch + self.start_batch
-
         for epoch in range(self.start_epoch, cfg.train.num_train_epochs):
             logger.info("***** Epoch %d *****", epoch)
             global_step = self._train_epoch(
@@ -242,10 +257,10 @@ class ReaderTrainer(object):
 
         return
 
-    def validate_and_save(self, epoch: int, iteration: int, scheduler):
+    def validate_and_save(self, epoch: int, iteration: int, scheduler, save_cp: bool = False):
         cfg = self.cfg
         # in distributed DDP mode, save checkpoint for only one process
-        save_cp = cfg.local_rank in [-1, 0]
+        save_cp = save_cp and cfg.local_rank in [-1, 0]
         reader_validation_score = self.validate()
 
         if save_cp:
@@ -363,7 +378,7 @@ class ReaderTrainer(object):
             # Gather from all GPUs
             all_questions, all_gold_answers, all_predicted_answers = gather(
                 self.cfg,
-                [all_questions. all_gold_answers, all_predicted_answers],
+                [all_questions, all_gold_answers, all_predicted_answers],
             )
             if self.cfg.local_rank in [-1, 0]:
                 self._save_predictions(
@@ -464,6 +479,13 @@ class ReaderTrainer(object):
                     latest_rolling_train_av_loss,
                 )
                 rolling_train_loss = 0.0
+
+            # Also log the first batch if resuming from a checkpoint to see
+            # if the loss value is normal
+            if self.model_file is not None and i == 0:
+                logger.info(
+                    f"Avg. loss per last 1 batches: {rolling_train_loss}",
+                )
 
             if global_step % eval_step == 0:
                 logger.info(
