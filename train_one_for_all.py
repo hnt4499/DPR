@@ -192,8 +192,6 @@ class OneForAllTrainer(object):
         self.reader_optimizer = reader_optimizer
         self.reader_scheduler_state = None
         self.clustering = cfg.biencoder.clustering
-        if self.clustering:
-            cfg.global_loss_buf_sz = 72000000  # this requires a lot of memory
 
         self.tensorizer = tensorizer
         self.start_epoch = 0

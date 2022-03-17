@@ -939,7 +939,7 @@ Helper functions
 """
 
 
-def gather(
+def gather_biencoder_preds_helper(
     cfg,
     local_q_vector,
     local_ctx_vectors,
@@ -963,7 +963,7 @@ def gather(
                 local_positive_idxs,
                 local_hard_negatives_idxs,
             ],
-            max_size=cfg.global_loss_buf_sz,
+            max_size=None,
         )
 
         global_q_vector = []
@@ -1021,7 +1021,8 @@ def calc_loss(
     across all the nodes.
     """
     # Gather data
-    gathered_data = gather(cfg, local_q_vector, local_ctx_vectors, local_positive_idxs, local_hard_negatives_idxs)
+    gathered_data = gather_biencoder_preds_helper(
+        cfg, local_q_vector, local_ctx_vectors, local_positive_idxs, local_hard_negatives_idxs)
     global_q_vector, global_ctxs_vector, positive_idx_per_question, hard_negatives_per_question = gathered_data
 
     loss, is_correct = loss_function.calc(

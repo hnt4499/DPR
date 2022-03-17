@@ -32,7 +32,7 @@ from dpr.models.biencoder_retrievers.biencoder import (
     BiEncoder,
     Match_BiEncoder,
     MatchGated_BiEncoder,
-    gather,
+    gather_biencoder_preds_helper,
     calc_loss,
 )
 from dpr.options import (
@@ -120,8 +120,6 @@ class BiEncoderTrainer(object):
         self.ds_cfg = BiencoderDatasetsCfg(cfg)
         self.loss_function = init_loss(cfg.encoder.encoder_model_type, cfg)
         self.clustering = cfg.clustering
-        if self.clustering:
-            cfg.global_loss_buf_sz = 80000000  # this requires a lot of memory
 
         if saved_state:
             self._load_saved_state(saved_state)
@@ -813,7 +811,7 @@ def _gather_interaction_matrices(
 
         global_interaction_matrices = all_gather_list(
             [interaction_matrix_to_send],
-            max_size=cfg.global_loss_buf_sz,
+            max_size=None,
         )
 
         global_interaction_matrix = []
@@ -848,7 +846,8 @@ def _calc_loss_matching(
     Note that this function also handle distributedly making forward call to the model to get interaction matrix.
     """
     # Gather data
-    gathered_data = gather(cfg, local_q_vector, local_ctx_vectors, local_positive_idxs, local_hard_negatives_idxs)
+    gathered_data = gather_biencoder_preds_helper(
+        cfg, local_q_vector, local_ctx_vectors, local_positive_idxs, local_hard_negatives_idxs)
     global_q_vector, global_ctxs_vector, positive_idx_per_question, hard_negatives_per_question = gathered_data
 
     # Distribute context vectors across GPUs, since the number of context vectors is larger than that of question vectors
