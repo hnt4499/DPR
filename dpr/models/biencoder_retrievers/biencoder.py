@@ -404,8 +404,14 @@ class BiEncoder(nn.Module):
             )
 
         ctx_ids = torch.tensor(ctx_ids, dtype=torch.int64)
-        ctxs_tensor = torch.cat([ctx.view(1, -1) for ctx in ctx_tensors], dim=0)
-        questions_tensor = torch.cat([q.view(1, -1) for q in question_tensors], dim=0)
+        ctxs_tensor = torch.cat(
+            [ctx.view(1, -1) for ctx in ctx_tensors],
+            dim=0,
+        ).to(torch.int64)
+        questions_tensor = torch.cat(
+            [q.view(1, -1) for q in question_tensors],
+            dim=0,
+        ).to(torch.int64)
 
         ctx_segments = torch.zeros_like(ctxs_tensor)
         question_segments = torch.zeros_like(questions_tensor)

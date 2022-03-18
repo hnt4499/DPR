@@ -375,6 +375,7 @@ class BertTensorizer(Tensorizer):
             if get_passage_offset:
                 passage_offset = 3 + len(ids["question"]) + len(ids["passage_title"])
 
+        token_ids = token_ids.astype("int64")
         if to_max_length:
             token_ids = self.to_max_length(token_ids, apply_max_len=True)
 

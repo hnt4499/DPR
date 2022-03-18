@@ -692,7 +692,7 @@ def _do_biencoder_fwd_pass(
 
     if model.training:
         model_out = model(
-            input.question_ids.int(),
+            input.question_ids,
             input.question_segments,
             q_attn_mask,
             input.context_ids,

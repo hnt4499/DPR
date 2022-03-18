@@ -329,6 +329,7 @@ class ReaderTrainer(object):
             em = np.mean(ems_n)
             logger.info("n=%d\tEM %.2f" % (n, em * 100))
 
+        f1 = 0
         for n in sorted(f1s[0].keys()):
             f1s_n = sum([f1[n] for f1 in f1s], [])  # gather and concatenate
             f1 = np.mean(f1s_n)
@@ -510,7 +511,7 @@ class ReaderTrainer(object):
         if self.reader.training:
             # start_logits, end_logits, rank_logits = self.reader(input.input_ids, attn_mask)
             loss = self.reader(
-                input.input_ids.int(),
+                input.input_ids,
                 attn_mask,
                 input.start_positions,
                 input.end_positions,

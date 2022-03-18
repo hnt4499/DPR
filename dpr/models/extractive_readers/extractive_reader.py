@@ -487,7 +487,7 @@ def _create_question_passages_tensors(
         negatives_selected.append(empty_ids.clone())
 
     context_IDs = torch.tensor(positives_IDs + negatives_IDs, dtype=torch.int64)
-    input_ids = torch.stack([t for t in positives_selected + negatives_selected], dim=0)
+    input_ids = torch.stack([t for t in positives_selected + negatives_selected], dim=0).to(torch.int64)
     assert len(context_IDs) == len(input_ids)
 
     return context_IDs, input_ids, answer_starts_tensor, answer_ends_tensor, answer_mask
