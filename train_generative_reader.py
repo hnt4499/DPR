@@ -28,13 +28,13 @@ from dpr.data.data_types import (
     GenerativeReaderBatch,
     GenerativeReaderSample,
 )
-from dpr.data.general_data import TokenizedWikipediaPassages
-from dpr.data.reader_data import (
-    GenerativeReaderGeneralDataset,
-)
+from dpr.data.general_data import GenerativeReaderGeneralDataset
+from dpr.data.general_data_preprocess import TokenizedWikipediaPassages
 from dpr.models import init_generative_reader_components
 from dpr.models.generative_readers.fid_base import FiDT5
-from dpr.models.generative_readers.generative_reader import create_generative_reader_input
+from dpr.models.generative_readers.generative_reader import (
+    create_generative_reader_input,
+)
 from dpr.options import (
     setup_cfg_gpu,
     set_seed,
@@ -52,7 +52,6 @@ from dpr.utils.model_utils import (
     load_states_from_checkpoint,
     move_to_device,
     CheckpointState,
-    get_model_file,
     setup_for_distributed_mode,
     get_model_obj,
 )
@@ -72,12 +71,11 @@ class ReaderTrainer(object):
 
         logger.info("***** Initializing components for training *****")
 
-        model_file = get_model_file(cfg, cfg.checkpoint_file_name)
-        if model_file is None:
-            saved_state = None
-        else:
-            saved_state = load_states_from_checkpoint(model_file)
-            set_generative_reader_cfg_params_from_state(saved_state.encoder_params, cfg)
+        saved_state = None
+        if cfg.model_file is not None:
+            saved_state = load_states_from_checkpoint(cfg.model_file)
+            set_generative_reader_cfg_params_from_state(
+                saved_state.encoder_params, cfg)
 
         gradient_checkpointing = cfg.gradient_checkpointing
         tensorizer, reader, optimizer = init_generative_reader_components(
@@ -101,7 +99,7 @@ class ReaderTrainer(object):
         self.reader: FiDT5 = reader
         self.optimizer = optimizer
         self.tensorizer = tensorizer
-        self.model_file = model_file
+        self.model_file = cfg.model_file
         self._load_saved_state(saved_state, resume=cfg.resume)
 
         self.debugging = cfg.debugging
@@ -110,7 +108,11 @@ class ReaderTrainer(object):
         self.best_validation_result = None
         self.best_cp_name = None
 
-    def _load_saved_state(self, saved_state: CheckpointState, resume: bool = True):
+    def _load_saved_state(
+        self,
+        saved_state: CheckpointState,
+        resume: bool = True,
+    ):
         if saved_state is None:
             self.scheduler_state = None
             self.start_epoch = 0
@@ -129,7 +131,8 @@ class ReaderTrainer(object):
             if offset == 0:  # epoch has been completed
                 epoch += 1
             logger.info(
-                f"Loading checkpoint @ epoch={epoch} and local iteration={offset}"
+                f"Loading checkpoint @ epoch={epoch} and local "
+                f"iteration={offset}"
             )
             self.start_epoch = epoch
             self.start_batch = offset
@@ -151,7 +154,8 @@ class ReaderTrainer(object):
     ) -> ShardedDataIterator:
 
         if self.wiki_data is None:
-            self.wiki_data = TokenizedWikipediaPassages(data_file=self.cfg.wiki_psgs_tokenized)
+            self.wiki_data = TokenizedWikipediaPassages(
+                data_file=self.cfg.wiki_psgs_tokenized)
 
         dataset = GenerativeReaderGeneralDataset(
             file=path,
@@ -181,10 +185,12 @@ class ReaderTrainer(object):
                 offset=0,
             )
             if offset > 0:
+                # Offset of this iterator is global step
                 updates_per_epoch = iterator.max_iterations // \
                     self.cfg.train.gradient_accumulation_steps
-                global_step = self.start_epoch * updates_per_epoch + self.start_batch
-                iterator.set_offset(global_step)  # offset of this iterator is global step
+                global_step = self.start_epoch * updates_per_epoch + \
+                    self.start_batch
+                iterator.set_offset(global_step)
         else:
             raise NotImplementedError
 
@@ -205,9 +211,12 @@ class ReaderTrainer(object):
             offset=self.start_batch,
         )
 
-        logger.info("Total iterations per epoch=%d", train_iterator.max_iterations)
+        logger.info(
+            f"Total iterations per epoch={train_iterator.max_iterations}"
+        )
         updates_per_epoch = (
-            train_iterator.max_iterations // cfg.train.gradient_accumulation_steps
+            train_iterator.max_iterations //
+            cfg.train.gradient_accumulation_steps
         )
 
         total_updates = updates_per_epoch * cfg.train.num_train_epochs
@@ -230,13 +239,20 @@ class ReaderTrainer(object):
             )
         # New model
         else:
-            scheduler = get_schedule_linear(self.optimizer, warmup_steps, total_updates)
+            scheduler = get_schedule_linear(
+                self.optimizer,
+                warmup_steps,
+                total_updates,
+            )
 
         # Eval before any training, but no checkpointing
         if self.model_file is not None and self.cfg.eval_first:
             logger.info("Evaluate loaded model before any training...")
             self.validate_and_save(
-                self.start_epoch, iteration=None, scheduler=None, save_cp=False,
+                self.start_epoch,
+                iteration=None,
+                scheduler=None,
+                save_cp=False,
             )
 
         eval_step = cfg.train.eval_step
@@ -252,12 +268,19 @@ class ReaderTrainer(object):
 
         if cfg.local_rank in [-1, 0]:
             logger.info(
-                "Training finished. Best validation checkpoint %s", self.best_cp_name
+                f"Training finished. Best validation checkpoint "
+                f"{self.best_cp_name}"
             )
 
         return
 
-    def validate_and_save(self, epoch: int, iteration: int, scheduler, save_cp: bool = False):
+    def validate_and_save(
+        self,
+        epoch: int,
+        iteration: int,
+        scheduler,
+        save_cp: bool = False,
+    ):
         cfg = self.cfg
         # in distributed DDP mode, save checkpoint for only one process
         save_cp = save_cp and cfg.local_rank in [-1, 0]
@@ -270,8 +293,9 @@ class ReaderTrainer(object):
             if reader_validation_score > (self.best_validation_result or 0):
                 self.best_validation_result = reader_validation_score
                 self.best_cp_name = cp_name
-                logger.info(f"New best validation checkpoint {cp_name} with validation score "
-                            f"{reader_validation_score:.2f}")
+                logger.info(
+                    f"New best validation checkpoint {cp_name} with validation "
+                    f"score {reader_validation_score:.2f}")
 
     def validate(self):
         logger.info("Validation ...")
@@ -290,7 +314,7 @@ class ReaderTrainer(object):
                 shuffle=False,
             )
 
-        log_result_step = cfg.train.log_batch_step // 4  # validation needs to be more verbose
+        log_result_step = max(cfg.train.log_batch_step // 4, 1)
         all_questions = []
         all_gold_answers = []
         all_predicted_answers = []
@@ -306,7 +330,8 @@ class ReaderTrainer(object):
                 shuffle=False,
             )
 
-            input = GenerativeReaderBatch(**move_to_device(input._asdict(), cfg.device))
+            input = GenerativeReaderBatch(
+                **move_to_device(input._asdict(), cfg.device))
             attn_mask = self.tensorizer.get_attn_mask(input.input_ids)
 
             outputs = reader_model.generate(
@@ -330,14 +355,14 @@ class ReaderTrainer(object):
 
             if i % log_result_step == 0:
                 logger.info(
-                    f"Eval step: {i}, question: {all_questions[-1]}, gold answers: "
-                    f"{all_gold_answers[-1]}, generated answer: "
+                    f"Eval step: {i}, question: {all_questions[-1]}, gold "
+                    f"answers: {all_gold_answers[-1]}, generated answer: "
                     f"{all_predicted_answers[-1]} "
                 )
 
             if self.debugging and i == 5:
                 logger.info(
-                    "Reached 10 iterations when debugging mode is on. "
+                    "Reached 5 iterations when debugging mode is on. "
                     "Early stopping..."
                 )
                 break
@@ -472,7 +497,8 @@ class ReaderTrainer(object):
 
             if (i + 1) % rolling_loss_step == 0:
                 logger.info("Train batch %d", data_iteration)
-                latest_rolling_train_av_loss = rolling_train_loss / rolling_loss_step
+                latest_rolling_train_av_loss = (
+                    rolling_train_loss / rolling_loss_step)
                 logger.info(
                     "Avg. loss per last %d batches: %f",
                     rolling_loss_step,
@@ -501,7 +527,7 @@ class ReaderTrainer(object):
 
             if self.debugging and i == 5:
                 logger.info(
-                    "Reached 10 iterations when debugging mode is on. "
+                    "Reached 5 iterations when debugging mode is on. "
                     "Early stopping..."
                 )
                 break
@@ -538,7 +564,8 @@ class ReaderTrainer(object):
         assert self.reader.training
 
         cfg = self.cfg
-        input = GenerativeReaderBatch(**move_to_device(input._asdict(), cfg.device))
+        input = GenerativeReaderBatch(
+            **move_to_device(input._asdict(), cfg.device))
         attn_mask = self.tensorizer.get_attn_mask(input.input_ids)
         loss = self.reader(
             input_ids=input.input_ids,
@@ -583,7 +610,7 @@ def main(cfg: DictConfig):
 
     cfg = setup_cfg_gpu(cfg)
     set_seed(cfg)
-    get_gpu_info(rank=cfg.local_rank)  # for now only work with single-GPU and DDP mode
+    get_gpu_info(rank=cfg.local_rank)
 
     if cfg.local_rank in [-1, 0]:
         logger.info("CFG (after gpu  configuration):")
@@ -602,8 +629,8 @@ def main(cfg: DictConfig):
         trainer.validate()
     else:
         logger.warning(
-            "Neither train_file or (model_file & dev_file) parameters are specified. "
-            "Nothing to do."
+            "Neither train_file or (model_file & dev_file) parameters are "
+            "specified. Nothing to do."
         )
 
 

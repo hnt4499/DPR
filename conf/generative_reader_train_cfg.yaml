@@ -1,5 +1,6 @@
 # Generative reader configuration
 defaults:
+  - _self_
   - train: generative_reader_default
   - encoder: fid_base
 
@@ -62,9 +63,6 @@ fp16_opt_level: O1
 
 # Gradient checkpointing settings
 gradient_checkpointing: True
-
-# a list of tokens to avoid tokenization
-special_tokens:
 
 # Debug
 debugging: False

@@ -1,4 +1,5 @@
 defaults:
+  - _self_
   - encoder: hf_bert # defines encoder initialization parameters
   - datasets: retriever_default # contains a list of all possible sources of queries for evaluation. Specific set is selected by qa_dataset parameter
   - ctx_sources: default_sources # contains a list of all possible passage sources. Specific passages sources selected by ctx_datatsets parameter
@@ -29,7 +30,6 @@ save_as_text_file: False
 # "regex" or "string"
 match: string
 n_docs: 100
-n_docs_match: 200  # for first stage of `Match_BiEncoder`; `n_docs` will then be of the second stage
 validation_workers: 1
 
 # Batch size to generate query embeddings
@@ -48,14 +48,10 @@ encoder_path:
 # if there is no index at the specific location, the index will be created from encoded_ctx_files
 index_path:
 
-kilt_out_file:
-
 # A trained bi-encoder checkpoint file to initialize the model
 model_file:
 ignore_pretrained_model_type: false
 
-validate_as_tables: False
-rpc_retriever_cfg_file:
 indexer: flat
 low_memory_footprint: False
 use_gpu: False
@@ -63,9 +59,6 @@ use_gpu: False
 # Save / load pre-computed question encoding
 save_encoding_to:
 load_encoding_from:
-
-# tokens which won't be slit by tokenizer
-special_tokens:
 
 # TODO: move to a conf group
 # local_rank for distributed training on gpus
@@ -79,3 +72,5 @@ fp16: False
 # For fp16: Apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."
 #        "See details at https://nvidia.github.io/apex/amp.html
 fp16_opt_level: O1
+
+debugging: False

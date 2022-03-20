@@ -1,6 +1,7 @@
 # extractive reader configuration
 
 defaults:
+  - _self_
   - encoder: hf_bert
   - train: extractive_reader_default
 
@@ -77,7 +78,7 @@ eval_top_docs:
 checkpoint_file_name: dpr_extractive_reader
 
 # Path to a file to write prediction results to
-prediction_results_file:
+prediction_results_file: predictions
 
 # Enables fully resumable mode
 fully_resumable: True
@@ -100,9 +101,6 @@ fp16_opt_level: O1
 
 # Gradient checkpointing settings
 gradient_checkpointing: False
-
-# a list of tokens to avoid tokenization
-special_tokens:
 
 # Debug
 debugging: False

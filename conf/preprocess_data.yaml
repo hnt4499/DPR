@@ -1,6 +1,5 @@
-# extractive reader configuration
-
 defaults:
+  - _self_
   - encoder: hf_bert
 
 # Whether to lower case the input text. Set True for uncased models, False for the cased ones.
@@ -52,14 +51,11 @@ output_dir: checkpoints/
 # num of threads to pre-process data.
 num_workers: 4
 
-# a list of tokens to avoid tokenization
-special_tokens:
-
 check_pre_tokenized_data: True
 
 # Debug
 debugging: False
 
 # Additional configs that overwrite the default ones
-# For description, see `general_data.py`
+# For description, see `general_data_preprocess.py`
 preprocess_cfg: {}

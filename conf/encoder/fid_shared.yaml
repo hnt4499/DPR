@@ -1,6 +1,4 @@
-# @package _group_
-
-# model type. One of [hf_bert, pytext_bert, fairseq_roberta]
+# model type.
 encoder_model_type: fid_shared
 
 # HuggingFace's config name for model initialization

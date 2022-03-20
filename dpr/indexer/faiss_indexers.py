@@ -6,7 +6,7 @@
 # LICENSE file in the root directory of this source tree.
 
 """
- FAISS-based index components for dense retriever
+FAISS-based index components for dense retriever
 """
 
 import faiss
@@ -32,7 +32,8 @@ class DenseIndexer(object):
     @property
     def gpu_res(self):
         if DenseIndexer._gpu_res is None:
-            DenseIndexer._gpu_res = faiss.StandardGpuResources()  # use a single GPU
+            # Use a single GPU
+            DenseIndexer._gpu_res = faiss.StandardGpuResources()
         return DenseIndexer._gpu_res
 
     def init_index(self, vector_sz: int, use_gpu: bool):
@@ -47,11 +48,6 @@ class DenseIndexer(object):
     def search_knn(
         self, query_vectors: np.array, top_docs: int
     ) -> List[Tuple[List[object], List[float]]]:
-        raise NotImplementedError
-
-    def search_knn_match(
-        self, query_vectors: np.array, top_docs: int
-    ) -> List[Tuple[List[object], List[object], List[float]]]:
         raise NotImplementedError
 
     def serialize(self, file: str):
@@ -87,7 +83,8 @@ class DenseIndexer(object):
 
         self.index = faiss.read_index(index_file)
         logger.info(
-            "Loaded index of type %s and size %d", type(self.index), self.index.ntotal
+            f"Loaded index of type {type(self.index)} and size "
+            f"{self.index.ntotal}"
         )
 
         with open(meta_file, "rb") as reader:
@@ -114,7 +111,8 @@ class DenseFlatIndexer(DenseIndexer):
         for i in range(0, n, self.buffer_size):
             db_ids = [t[0] for t in data[i : i + self.buffer_size]]
             vectors = [
-                np.reshape(t[1], (1, -1)) for t in data[i : i + self.buffer_size]
+                np.reshape(t[1], (1, -1))
+                for t in data[i : i + self.buffer_size]
             ]
             vectors = np.concatenate(vectors, axis=0)
             total_data = self._update_id_mapping(db_ids)
@@ -136,25 +134,14 @@ class DenseFlatIndexer(DenseIndexer):
         result = [(db_ids[i], scores[i]) for i in range(len(db_ids))]
         return result
 
-    def search_knn_match(
-        self, query_vectors: np.array, top_docs: int
-    ) -> List[Tuple[List[object], List[object], List[float]]]:
-        scores, indexes = self.index.search(query_vectors, top_docs)
-        # convert to external ids
-        db_ids = [
-            [self.index_id_to_db_id[i] for i in query_top_idxs]
-            for query_top_idxs in indexes
-        ]
-        result = [(db_ids[i], indexes[i], scores[i]) for i in range(len(db_ids))]
-        return result
-
     def get_index_name(self):
         return "flat_index"
 
 
 class DenseHNSWFlatIndexer(DenseIndexer):
     """
-    Efficient index for retrieval. Note: default settings are for hugh accuracy but also high RAM usage
+    Efficient index for retrieval. Note: default settings are for hugh accuracy
+    but also high RAM usage
     """
 
     def __init__(
@@ -165,7 +152,10 @@ class DenseHNSWFlatIndexer(DenseIndexer):
         ef_construction: int = 200,
         use_gpu: bool = False,
     ):
-        super(DenseHNSWFlatIndexer, self).__init__(buffer_size=buffer_size, use_gpu=use_gpu)
+        super(DenseHNSWFlatIndexer, self).__init__(
+            buffer_size=buffer_size,
+            use_gpu=use_gpu,
+        )
         self.store_n = store_n
         self.ef_search = ef_search
         self.ef_construction = ef_construction
@@ -173,7 +163,8 @@ class DenseHNSWFlatIndexer(DenseIndexer):
 
     def init_index(self, vector_sz: int):
         # IndexHNSWFlat supports L2 similarity only
-        # so we have to apply DOT -> L2 similairy space conversion with the help of an extra dimension
+        # so we have to apply DOT -> L2 similairy space conversion with the
+        # help of an extra dimension
         index = faiss.IndexHNSWFlat(vector_sz + 1, self.store_n)
         index.hnsw.efSearch = self.ef_search
         index.hnsw.efConstruction = self.ef_construction
@@ -185,7 +176,8 @@ class DenseHNSWFlatIndexer(DenseIndexer):
     def _index_data(self, data: List[Tuple[object, np.array]]):
         n = len(data)
 
-        # max norm is required before putting all vectors in the index to convert inner product similarity to L2
+        # max norm is required before putting all vectors in the index to
+        # convert inner product similarity to L2
         if self.phi > 0:
             raise RuntimeError(
                 "DPR HNSWF index needs to index all data at once,"
@@ -250,12 +242,14 @@ class DenseHNSWFlatIndexer(DenseIndexer):
 
 class DenseHNSWSQIndexer(DenseHNSWFlatIndexer):
     """
-    Efficient index for retrieval. Note: default settings are for hugh accuracy but also high RAM usage
+    Efficient index for retrieval. Note: default settings are for hugh accuracy
+    but also high RAM usage
     """
 
     def init_index(self, vector_sz: int):
         # IndexHNSWFlat supports L2 similarity only
-        # so we have to apply DOT -> L2 similairy space conversion with the help of an extra dimension
+        # so we have to apply DOT -> L2 similairy space conversion with the
+        # help of an extra dimension
         index = faiss.IndexHNSWSQ(
             vector_sz + 1, faiss.ScalarQuantizer.QT_8bit, self.store_n
         )

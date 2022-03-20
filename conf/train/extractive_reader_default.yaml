@@ -1,5 +1,3 @@
-# @package _group_
-
 eval_step: 5000
 batch_size: 1
 dev_batch_size: 5
@@ -10,7 +8,6 @@ log_batch_step: 100
 train_rolling_loss_step: 100
 weight_decay: 0.0
 learning_rate: 1e-5
-average_loss: False
 
 # Linear warmup over warmup_steps.
 warmup_steps: 0

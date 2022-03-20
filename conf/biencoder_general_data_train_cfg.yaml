@@ -1,6 +1,7 @@
 
 # configuration groups
 defaults:
+  - _self_
   - encoder: hf_bert
   - train: biencoder_default
 
@@ -30,7 +31,6 @@ checkpoint_start_epoch: 30  # epoch to start checkpointing (i.e., saving model)
 # Whether to lower case the input text. Set True for uncased models, False for the cased ones.
 do_lower_case: True
 
-fix_ctx_encoder: False
 val_av_rank_start_epoch: 30
 seed: 12345
 
@@ -57,6 +57,3 @@ fp16_opt_level: O1
 
 # Gradient checkpointing settings
 gradient_checkpointing: False
-
-# tokens which won't be slit by tokenizer
-special_tokens:

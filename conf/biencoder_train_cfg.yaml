@@ -1,6 +1,6 @@
-
 # configuration groups
 defaults:
+  - _self_
   - encoder: hf_bert
   - train: biencoder_default
   - datasets: encoder_train_default
@@ -9,13 +9,11 @@ train_datasets:
 dev_datasets:
 wiki_data:  # needed when `train_datasets` or `dev_datasets` is of general dataset scheme
 output_dir:
-train_sampling_rates:
 loss_scale_factors:
 
 # Whether to lower case the input text. Set True for uncased models, False for the cased ones.
 do_lower_case: True
 
-fix_ctx_encoder: False
 val_av_rank_start_epoch: 30
 seed: 12345
 checkpoint_file_name: dpr_biencoder
@@ -42,13 +40,8 @@ fp16_opt_level: O1
 # Gradient checkpointing settings
 gradient_checkpointing: False
 
-# tokens which won't be slit by tokenizer
-special_tokens:
-
 ignore_checkpoint_offset: False
 ignore_checkpoint_optimizer: False
 
 # set to >1 to enable multiple query encoders
 multi_q_encoder: False
-
-clustering: False

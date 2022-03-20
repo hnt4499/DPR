@@ -3,7 +3,7 @@ FiD with shared encoder-decoder architecture to minimize memory footprint.
 """
 
 
-from .fid_base import (
+from dpr.models.generative_readers.fid_base import (
     get_generative_reader_components as base_fid_reader,
     get_generative_tensorizer,
 )

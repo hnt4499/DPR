@@ -18,7 +18,10 @@ import logging
 import hydra
 from omegaconf import DictConfig
 
-from dpr.data.general_data import GeneralDataset, TokenizedWikipediaPassages
+from dpr.data.general_data_preprocess import (
+    GeneralDatasetPreprocessor,
+    TokenizedWikipediaPassages,
+)
 from dpr.models import init_tenzorizer
 from dpr.options import setup_logger
 
@@ -55,11 +58,13 @@ class PreProcessor(object):
                 data_file=self.cfg.wiki_psgs_tokenized)
 
         if path is None:
-            logger.info(f"Path is not specified for `is_train={is_train}`. Skipping")
+            logger.info(
+                f"Path is not specified for `is_train={is_train}`. ""Skipping"
+            )
             return
 
         # Preprocess
-        dataset = GeneralDataset(
+        dataset = GeneralDatasetPreprocessor(
             files=path,
             bm25_retrieval_file=bm25_retrieval_results,
             wiki_data=self.wiki_data,
@@ -86,7 +91,8 @@ class PreProcessor(object):
             bm25_retrieval_results=self.cfg.bm25_retrieval_results,
         )
 
-        # Temporarily remove Wikipedia passages to avoid too much data being transferred in multiprocessing
+        # Temporarily remove Wikipedia passages to avoid too much data being
+        # transferred in multiprocessing
         self.wiki_data.remove_data()
 
         # Load dev data

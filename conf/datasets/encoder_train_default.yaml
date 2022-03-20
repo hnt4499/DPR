@@ -1,120 +1,14 @@
-# @package _group_
-
 nq_train:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-train
-
-nq_train_aug:
-  _target_: dpr.data.biencoder_data.JsonQADataset
-  file: data.retriever.nq-train
-  ctx_boundary_aug: 10
-  ctx_min_len: 80
-
-nq_train_aug_2:
-  _target_: dpr.data.biencoder_data.JsonQADatasetWithAllPassages
-  file: /data/tuyen/openqa/DPR/notebooks/4_aug/data/nq-train-no-text.json
-  all_passages_file: /data/tuyen/openqa/DPR/notebooks/4_aug/data/psgs_w100_for_aug_processed.csv
-  ctx_boundary_aug: 15
-  ctx_aug_prob: 0.3
-
-nq_train_cat:
-  _target_: dpr.data.biencoder_data.JsonQADataset
-  file: data.retriever.nq-train
-  sample_by_cat: true
-  sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled_puffer/nq-train-{}.json
-
-nq_train_aug_cat:
-  _target_: dpr.data.biencoder_data.JsonQADataset
-  file: data.retriever.nq-train
-  ctx_boundary_aug: 10
-  ctx_min_len: 80
-  sample_by_cat: true
-  sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled_puffer/nq-train-{}.json
-
-nq_train_rand_pos:
-  _target_: dpr.data.biencoder_data.JsonQADataset
-  file: data.retriever.nq-train
-  selector:
-    _target_: dpr.data.biencoder_data.RandomTokenSelector
-    static_position: 0
 
 nq_train_hn1:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-adv-hn-train
 
-nq_train_hn1_1k:
-  _target_: dpr.data.biencoder_data.JsonQADataset
-  file: /data/tuyen/openqa/DPR/downloads/data/retriever/nq-adv-hn-train-1k.json
-
-nq_train_hn1_aug:
-  _target_: dpr.data.biencoder_data.JsonQADataset
-  file: data.retriever.nq-adv-hn-train
-  ctx_boundary_aug: 10
-  ctx_min_len: 80
-
-nq_train_hn1_aug_2:
-  _target_: dpr.data.biencoder_data.JsonQADatasetWithAllPassages
-  file: /data/tuyen/openqa/DPR/notebooks/4_aug/data/nq-adv-hn-train-no-text.json
-  all_passages_file: /data/tuyen/openqa/DPR/notebooks/4_aug/data/psgs_w100_for_aug_processed.csv
-  ctx_boundary_aug: 20
-  ctx_aug_prob: 0.3
-
-nq_train_hn1_aug_2_cat:
-  _target_: dpr.data.biencoder_data.JsonQADatasetWithAllPassages
-  file: /data/tuyen/openqa/DPR/notebooks/4_aug/data/nq-adv-hn-train-no-text.json
-  sample_by_cat: true
-  sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled_puffer/nq-adv-hn-train-{}.json
-  all_passages_file: /data/tuyen/openqa/DPR/notebooks/4_aug/data/psgs_w100_for_aug_processed.csv
-  ctx_boundary_aug: 20
-  ctx_aug_prob: 0.3
-
-nq_train_hn1_cat:
-  _target_: dpr.data.biencoder_data.JsonQADataset
-  file: data.retriever.nq-adv-hn-train
-  sample_by_cat: true
-  sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled_puffer/nq-adv-hn-train-{}.json
-
-nq_train_hn1_aug_cat:
-  _target_: dpr.data.biencoder_data.JsonQADataset
-  file: data.retriever.nq-adv-hn-train
-  ctx_boundary_aug: 10
-  ctx_min_len: 80
-  sample_by_cat: true
-  sampled_idxs_path: /data/tuyen/openqa/DPR/notebooks/2_categories/sampled_puffer/nq-adv-hn-train-{}.json
-
-nq_train_hn1_rand_pos:
-  _target_: dpr.data.biencoder_data.JsonQADataset
-  file: data.retriever.nq-adv-hn-train
-  selector:
-    _target_: dpr.data.biencoder_data.RandomTokenSelector
-    static_position: 0
-
 nq_dev:
   _target_: dpr.data.biencoder_data.JsonQADataset
   file: data.retriever.nq-dev
-
-# ============================= General Data =================================
-nq_train_general:  # contains both BM25 negatives and dense hard negatives
-  _target_: dpr.data.biencoder_data.BiEncoderGeneralDataset
-  file: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new-2/train.json
-  shuffle_positives: True
-  only_gold: False
-
-nq_train_general_aug:  # with data augmentation
-  _target_: dpr.data.biencoder_data.BiEncoderGeneralDatasetWithDataAugmentation
-  file: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new-2/train.json
-  shuffle_positives: True
-  only_gold: False
-  ctx_aug_boundary: 15
-  ctx_aug_prob: 0.3
-
-nq_dev_general:  # contains both BM25 negatives and dense hard negatives
-  _target_: dpr.data.biencoder_data.BiEncoderGeneralDataset
-  file: /data/tuyen/openqa/DPR/downloads/data/retriever_results/nq/single-new-2/dev.json
-  shuffle_positives: False
-  only_gold: True
-
-# ============================================================================
 
 trivia_train:
   _target_: dpr.data.biencoder_data.JsonQADataset

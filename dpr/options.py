@@ -10,18 +10,17 @@ Command line arguments utils
 """
 
 
-import logging
-import numpy as np
 import os
+import logging
 import random
 import socket
-import torch
 
+import numpy as np
+import torch
 from omegaconf import DictConfig
 
-logger = logging.getLogger()
 
-# TODO: to be merged with conf_utils.py
+logger = logging.getLogger()
 
 
 def set_cfg_params_from_state(state: dict, cfg: DictConfig):
@@ -37,8 +36,12 @@ def set_cfg_params_from_state(state: dict, cfg: DictConfig):
     cfg.encoder.sequence_length = state["sequence_length"]
 
     if cfg.encoder.encoder_model_type != state["encoder_model_type"]:
-        logger.warn(f"Model type specified in the config file ('{cfg.encoder.encoder_model_type}') and model type "
-                    f"obtained from the checkpoint ('{state['encoder_model_type']}') are different")
+        logger.warn(
+            f"Model type specified in the config file "
+            f"('{cfg.encoder.encoder_model_type}') and model type obtained "
+            f"from the checkpoint ('{state['encoder_model_type']}') are "
+            f"different"
+        )
         if not cfg.ignore_pretrained_model_type:
             cfg.encoder.encoder_model_type = state["encoder_model_type"]
 
@@ -54,16 +57,21 @@ def set_generative_reader_cfg_params_from_state(state: dict, cfg: DictConfig):
     cfg.encoder.answer_max_length = state["answer_max_length"]
 
     if cfg.encoder.encoder_model_type != state["encoder_model_type"]:
-        logger.warn(f"Model type specified in the config file ('{cfg.encoder.encoder_model_type}') and model type "
-                    f"obtained from the checkpoint ('{state['encoder_model_type']}') are different")
+        logger.warn(
+            f"Model type specified in the config file "
+            f"('{cfg.encoder.encoder_model_type}') and model type obtained "
+            f"from the checkpoint ('{state['encoder_model_type']}') are "
+            f"different"
+        )
         if not cfg.ignore_pretrained_model_type:
             cfg.encoder.encoder_model_type = state["encoder_model_type"]
 
 
 def get_encoder_params_state_from_cfg(cfg: DictConfig):
     """
-    Selects the param values to be saved in a checkpoint, so that a trained model can be used for downstream
-    tasks without the need to specify these parameter again
+    Selects the param values to be saved in a checkpoint, so that a trained
+    model can be used for downstream tasks without the need to specify these
+    parameter again
     :return: Dict of params to memorize in a checkpoint
     """
     return {
@@ -78,8 +86,9 @@ def get_encoder_params_state_from_cfg(cfg: DictConfig):
 
 def get_generative_reader_params_state_from_cfg(cfg: DictConfig):
     """
-    Selects the param values to be saved in a checkpoint, so that a trained model can be used for downstream
-    tasks without the need to specify these parameter again
+    Selects the param values to be saved in a checkpoint, so that a trained
+    model can be used for downstream tasks without the need to specify these
+    parameter again
     :return: Dict of params to memorize in a checkpoint
     """
     return {
@@ -107,10 +116,13 @@ def setup_cfg_gpu(cfg):
     ws = os.environ.get("WORLD_SIZE")
     cfg.distributed_world_size = int(ws) if ws else 1
     logger.info("WORLD_SIZE %s", ws)
-    if cfg.local_rank == -1 or cfg.no_cuda:  # single-node multi-gpu (or cpu) mode
+
+    # Single-node multi-gpu (or cpu) mode
+    if cfg.local_rank == -1 or cfg.no_cuda:
         device = str(
             torch.device(
-                "cuda" if torch.cuda.is_available() and not cfg.no_cuda else "cpu"
+                "cuda" if torch.cuda.is_available() and not cfg.no_cuda
+                else "cpu"
             )
         )
         cfg.n_gpu = torch.cuda.device_count()
@@ -123,12 +135,9 @@ def setup_cfg_gpu(cfg):
     cfg.device = device
 
     logger.info(
-        "Initialized host %s as d.rank %d on device=%s, n_gpu=%d, world size=%d",
-        socket.gethostname(),
-        cfg.local_rank,
-        cfg.device,
-        cfg.n_gpu,
-        cfg.distributed_world_size,
+        f"Initialized host {socket.gethostname()} as d.rank {cfg.local_rank} "
+        f"on device={cfg.device}, n_gpu={cfg.n_gpu}, "
+        f"world size={cfg.distributed_world_size}",
     )
     logger.info("16-bits training: %s ", cfg.fp16)
     return cfg
@@ -152,5 +161,8 @@ def get_gpu_info(rank, index=0):
     available = (total_memory - reserved)
     offset = (1024 ** 2)
 
-    logger.info(f"GPU Info: rank {rank}, total mem: {total_memory / offset:.1f} MB, reserved: {reserved / offset:.1f} "
-                f"MB, available: {available / offset:.1f} MB.")
+    logger.info(
+        f"GPU Info: rank {rank}, total mem: {total_memory / offset:.1f} MB, "
+        f"reserved: {reserved / offset:.1f} MB, available: "
+        f"{available / offset:.1f} MB."
+    )

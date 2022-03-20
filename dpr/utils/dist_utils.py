@@ -15,7 +15,6 @@ from typing import List, Tuple, Any
 import torch
 from torch import Tensor as T
 import torch.distributed as dist
-from tqdm import tqdm as tqdm_orig
 
 
 def get_rank():
@@ -83,13 +82,16 @@ def all_gather_list(
     buffer.zero_()
     cpu_buffer = all_gather_list._cpu_buffer
 
-    assert enc_size < 256 ** SIZE_STORAGE_BYTES, 'Encoded object size should be less than {} bytes'.format(
-        256 ** SIZE_STORAGE_BYTES)
+    assert enc_size < 256 ** SIZE_STORAGE_BYTES, (
+        f'Encoded object size should be less than {256 ** SIZE_STORAGE_BYTES} '
+        f'bytes'
+    )
 
     size_bytes = enc_size.to_bytes(SIZE_STORAGE_BYTES, byteorder='big')
 
     cpu_buffer[0:SIZE_STORAGE_BYTES] = torch.ByteTensor(list(size_bytes))
-    cpu_buffer[SIZE_STORAGE_BYTES: enc_size + SIZE_STORAGE_BYTES] = torch.ByteTensor(list(enc))
+    cpu_buffer[SIZE_STORAGE_BYTES:enc_size + SIZE_STORAGE_BYTES] = \
+        torch.ByteTensor(list(enc))
 
     start = rank * max_size
     size = enc_size + SIZE_STORAGE_BYTES
@@ -101,18 +103,26 @@ def all_gather_list(
         result = []
         for i in range(world_size):
             out_buffer = buffer[i * max_size: (i + 1) * max_size]
-            size = int.from_bytes(out_buffer[0:SIZE_STORAGE_BYTES], byteorder='big')
+            size = int.from_bytes(
+                out_buffer[0:SIZE_STORAGE_BYTES],
+                byteorder='big',
+            )
             if size > 0:
-                result.append(pickle.loads(bytes(out_buffer[SIZE_STORAGE_BYTES: size + SIZE_STORAGE_BYTES].tolist())))
+                r = pickle.loads(bytes(
+                    out_buffer[SIZE_STORAGE_BYTES:size + SIZE_STORAGE_BYTES]
+                    .tolist()
+                ))
+                result.append(r)
         return result
     except pickle.UnpicklingError:
         raise Exception(
-            'Unable to unpickle data from other workers. all_gather_list requires all '
-            'workers to enter the function together, so this error usually indicates '
-            'that the workers have fallen out of sync somehow. Workers can fall out of '
-            'sync if one of them runs out of memory, or if there are other conditions '
-            'in your training script that can cause one worker to finish an epoch '
-            'while other workers are still iterating over their portions of the data.'
+            'Unable to unpickle data from other workers. all_gather_list '
+            'requires all workers to enter the function together, so this '
+            'error usually indicates that the workers have fallen out of sync '
+            'somehow. Workers can fall out of sync if one of them runs out of '
+            'memory, or if there are other conditions in your training script '
+            'that can cause one worker to finish an epoch while other workers '
+            'are still iterating over their portions of the data.'
         )
 
 
@@ -148,9 +158,9 @@ def gather(
         for object in objects_to_sync:
             if isinstance(object, T) and object.is_cuda:
                 on_gpus.append(1)
-                copied_object_to_sync = torch.empty_like(  # clone, detach and transfer to CPU
+                copied_object_to_sync = torch.empty_like(
                     object, device="cpu"
-                ).copy_(object).detach_()
+                ).copy_(object).detach_()  # clone, detach and transfer to CPU
                 copied_objects_to_sync.append(copied_object_to_sync)
             else:
                 on_gpus.append(0)
@@ -162,7 +172,8 @@ def gather(
         )
         # Sort gathered objects according to ranks, so that all processes
         # will receive the same objects in the same order
-        global_objects_to_sync = sorted(global_objects_to_sync, key=lambda x: x[0])
+        global_objects_to_sync = sorted(
+            global_objects_to_sync, key=lambda x: x[0])
 
         gathered_objects = []
         for rank, items in global_objects_to_sync:
@@ -193,21 +204,11 @@ def is_main_process():
     return get_rank() == 0
 
 
-def get_tqdm():
-    if is_main_process():
-        return tqdm_orig
-    else:
-        def do_nothing(x, *args, **kwargs):
-            return x
-        return do_nothing
-
-
 def broadcast_object(obj: Any = None):
     """
-    Broadcase any arbitrary pickable object from the master process
-    to all other processes. The master process must call this function
-    with `obj` specified. Other processes must call this function
-    without any arguments.
+    Broadcase any arbitrary pickable object from the master process to all
+    other processes. The master process must call this function with `obj`
+    specified. Other processes must call this function without any arguments.
     """
     if not dist.is_initialized():
         return obj

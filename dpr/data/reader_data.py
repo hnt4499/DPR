@@ -6,38 +6,18 @@
 # LICENSE file in the root directory of this source tree.
 
 """
- Set of utilities for the Reader model related data processing tasks
+Set of utilities for the Reader model related data processing tasks
 """
 
-import logging
 
+import logging
 from typing import Tuple, List
 
 from dpr.utils.data_utils import Tensorizer
-from dpr.data.biencoder_data import OneForAllDataset
 from dpr.data.data_types import SpanPrediction
 
+
 logger = logging.getLogger()
-
-
-"""
--------------------------------- Dataset-related utilities --------------------------------
-"""
-
-
-class ExtractiveReaderGeneralDataset(OneForAllDataset):
-    def __init__(self, **kwargs):
-        super(ExtractiveReaderGeneralDataset, self).__init__(mode="reader", **kwargs)
-
-
-class GenerativeReaderGeneralDataset(OneForAllDataset):
-    def __init__(self, **kwargs):
-        super(GenerativeReaderGeneralDataset, self).__init__(mode="reader", **kwargs)
-
-
-"""
--------------------------------- Inference-related utilities --------------------------------
-"""
 
 
 def get_best_spans(
@@ -71,7 +51,8 @@ def get_best_spans(
         if any(
             [
                 start_index <= prev_start_index <= prev_end_index <= end_index
-                or prev_start_index <= start_index <= end_index <= prev_end_index
+                or prev_start_index <= start_index \
+                    <= end_index <= prev_end_index
                 for (prev_start_index, prev_end_index) in chosen_span_intervals
             ]
         ):
@@ -82,7 +63,8 @@ def get_best_spans(
             tensorizer, ctx_ids, (start_index, end_index)
         )
 
-        predicted_answer = tensorizer.to_string(ctx_ids[start_index : end_index + 1])
+        predicted_answer = tensorizer.to_string(
+            ctx_ids[start_index : end_index + 1])
         best_spans.append(
             SpanPrediction(
                 predicted_answer, score, relevance_score, passage_idx, ctx_ids
@@ -96,14 +78,18 @@ def get_best_spans(
 
 
 def _extend_span_to_full_words(
-    tensorizer: Tensorizer, tokens: List[int], span: Tuple[int, int]
+    tensorizer: Tensorizer,
+    tokens: List[int],
+    span: Tuple[int, int],
 ) -> Tuple[int, int]:
+
     start_index, end_index = span
     max_len = len(tokens)
     while start_index > 0 and tensorizer.is_sub_word_id(tokens[start_index]):
         start_index -= 1
 
-    while end_index < max_len - 1 and tensorizer.is_sub_word_id(tokens[end_index + 1]):
+    while end_index < max_len - 1 and \
+            tensorizer.is_sub_word_id(tokens[end_index + 1]):
         end_index += 1
 
     return start_index, end_index

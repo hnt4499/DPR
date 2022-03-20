@@ -6,7 +6,6 @@ import collections
 from typing import List
 
 import numpy as np
-from torch import Tensor as T
 
 
 """
@@ -15,7 +14,8 @@ General
 
 class DataPassage(object):
     """
-    Container to collect and cache all Q&A passages related attributes before generating the retriever/reader input
+    Container to collect and cache all Q&A passages related attributes before
+    generating the retriever/reader input
     """
 
     def __init__(
@@ -30,7 +30,9 @@ class DataPassage(object):
 
         self.id = int(id)  # passage ID
         self.is_gold = False  # whether this is exactly a gold passage
-        self.is_from_gold = False  # whether this is from the gold passage (or same article as of the gold passage)
+        # Whether this is from the gold passage (or same article as of the gold
+        # passage)
+        self.is_from_gold = False
         self.is_from_bm25 = is_from_bm25
 
         # String passage representations; used for double checking only
@@ -107,9 +109,9 @@ class DataSample(object):
     ):
         self.question = question
         self.question_token_ids = question_token_ids
-        self.answers = answers  # all answers (including expanded set of answers)
+        self.answers = answers  # all answers (including expanded answers)
         self.orig_answers = orig_answers  # original set of answers
-        self.expanded_answers = expanded_answers  # expanded set of answers using heuristics
+        self.expanded_answers = expanded_answers  # expanded set of answers
 
         # Gold
         self.gold_passages = gold_passages
@@ -180,6 +182,7 @@ BiEncoderPassageTokenized = collections.namedtuple(
         "title_ids",
     ]
 )
+
 class BiEncoderSampleTokenized(object):
     query_ids: np.ndarray
     positive_passages: List[BiEncoderPassageTokenized]
@@ -192,7 +195,6 @@ BiEncoderBatch = collections.namedtuple(
     [
         "question_ids",
         "question_segments",
-        "context_IDs",
         "context_ids",
         "ctx_segments",
         "is_positive",
@@ -218,7 +220,6 @@ class ReaderSample(DataSample):
 ReaderBatch = collections.namedtuple(
     'ReaderBatch',
     [
-        'context_IDs',
         'input_ids',
         'start_positions',
         'end_positions',
@@ -241,7 +242,7 @@ SpanPrediction = collections.namedtuple(
 
 
 """
-Reader
+Generative reader
 """
 
 class GenerativeReaderPassage(ReaderPassage):
@@ -254,7 +255,6 @@ class GenerativeReaderSample(ReaderSample):
 GenerativeReaderBatch = collections.namedtuple(
     'GenerativeReaderBatch',
     [
-        'context_IDs',
         'input_ids',
         'answer_ids',
     ],
@@ -263,78 +263,8 @@ GenerativeReaderBatch = collections.namedtuple(
 
 """
 Configs
-For now for One-For-All models only
 """
 
-
-# During input preparing
-BiEncoderDataConfig = collections.namedtuple(
-    "BiEncoderDataConfig",
-    [
-        "insert_title",
-        "num_hard_negatives",
-        "num_other_negatives",
-        "shuffle",
-        "shuffle_positives",
-        "hard_neg_fallback",
-        "query_token",
-    ],
-)
-
-# During forward pass
-BiEncoderTrainingConfig = collections.namedtuple(
-    "BiEncoderTrainingConfig",
-    [
-        "encoder_type",
-        "rep_positions_q",
-        "rep_positions_c",
-    ],
-)
-
-
-BiEncoderPredictionBatch = collections.namedtuple(
-    "BiEncoderPredictionBatch",
-    [
-        "question_vector",
-        "context_vector",
-    ],
-)
-
-
-# During input preparing
-ReaderDataConfig = collections.namedtuple(
-    "ReaderDataConfig",
-    [
-        "passages_per_question",
-        "max_length",  # encoder maximum sequence length, e.g., 256 or 350
-        "max_n_answers",  # maximum number of answer spans to marginalize per each sample
-        "is_train",
-        "shuffle",
-        "num_sub_batches",
-    ],
-)
-
-# During forward pass
-ReaderTrainingConfig = collections.namedtuple(
-    "ReaderTrainingConfig",
-    [
-        "use_simple_loss",
-        "average_loss",
-        "do_softmax_before_score_scaling",
-    ],
-)
-
-ReaderPredictionBatch = collections.namedtuple(
-    "ReaderPredictionBatch",
-    [
-        # During training
-        "total_loss",
-        # During evaluation
-        "start_logits",
-        "end_logits",
-        "relevance_logits",
-    ],
-)
 
 ReaderQuestionPredictions = collections.namedtuple(
     "ReaderQuestionPredictions",
@@ -342,17 +272,5 @@ ReaderQuestionPredictions = collections.namedtuple(
         "id",
         "predictions",
         "gold_answers",
-    ]
-)
-
-ForwardPassOutputsTrain = collections.namedtuple(
-    "ForwardPassOutputs",  # when training, i.e., `inference_only` is False
-    [
-        "loss",
-        "biencoder_is_correct",  # correct count
-        "biencoder_input",
-        "biencoder_preds",  # tensor
-        "reader_input",
-        "reader_preds",  # list of tensors
     ]
 )

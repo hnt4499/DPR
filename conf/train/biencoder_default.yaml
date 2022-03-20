@@ -1,5 +1,3 @@
-# @package _group_
-
 batch_size: 2
 dev_batch_size: 4
 adam_eps: 1e-8

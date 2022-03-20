@@ -19,7 +19,6 @@ import logging
 import numpy as np
 import os
 import torch
-torch.autograd.set_detect_anomaly(True)
 
 from collections import defaultdict
 from omegaconf import DictConfig, OmegaConf
@@ -27,14 +26,11 @@ from typing import List
 
 from dpr.data.qa_validation import exact_match_score, f1_score
 from dpr.data.data_types import ReaderBatch, ReaderQuestionPredictions
-from dpr.data.general_data import TokenizedWikipediaPassages
-from dpr.data.reader_data import (
-    ExtractiveReaderGeneralDataset,
-)
+from dpr.data.general_data import ExtractiveReaderGeneralDataset
+from dpr.data.general_data_preprocess import TokenizedWikipediaPassages
 from dpr.models import init_reader_components
 from dpr.models.extractive_readers.extractive_reader import (
     create_reader_input,
-    compute_loss,
     get_best_prediction,
 )
 from dpr.options import (
@@ -54,11 +50,11 @@ from dpr.utils.model_utils import (
     load_states_from_checkpoint,
     move_to_device,
     CheckpointState,
-    get_model_file,
     setup_for_distributed_mode,
     get_model_obj,
 )
 from dpr.utils.dist_utils import gather
+
 
 logger = logging.getLogger()
 setup_logger(logger)
@@ -73,15 +69,16 @@ class ReaderTrainer(object):
 
         logger.info("***** Initializing components for training *****")
 
-        model_file = get_model_file(self.cfg, self.cfg.checkpoint_file_name)
         saved_state = None
-        if model_file:
-            saved_state = load_states_from_checkpoint(model_file)
+        if cfg.model_file is not None:
+            saved_state = load_states_from_checkpoint(cfg.model_file)
             set_cfg_params_from_state(saved_state.encoder_params, cfg)
 
-        gradient_checkpointing = getattr(self.cfg, "gradient_checkpointing", False)
+        gradient_checkpointing = getattr(
+            self.cfg, "gradient_checkpointing", False)
         tensorizer, reader, optimizer = init_reader_components(
-            cfg.encoder.encoder_model_type, cfg, gradient_checkpointing=gradient_checkpointing,
+            cfg.encoder.encoder_model_type, cfg,
+            gradient_checkpointing=gradient_checkpointing,
         )
 
         reader, optimizer = setup_for_distributed_mode(
@@ -106,7 +103,7 @@ class ReaderTrainer(object):
         self.best_validation_result = None
         self.best_cp_name = None
 
-        self.model_file = model_file
+        self.model_file = cfg.model_file
         if saved_state:
             self._load_saved_state(saved_state, resume=cfg.resume)
 
@@ -122,7 +119,8 @@ class ReaderTrainer(object):
     ) -> ShardedDataIterator:
 
         if self.wiki_data is None:
-            self.wiki_data = TokenizedWikipediaPassages(data_file=self.cfg.wiki_psgs_tokenized)
+            self.wiki_data = TokenizedWikipediaPassages(
+                data_file=self.cfg.wiki_psgs_tokenized)
 
         dataset = ExtractiveReaderGeneralDataset(
             file=path,
@@ -131,7 +129,6 @@ class ReaderTrainer(object):
             iterator_class=iterator_class,
             compress=self.cfg.compress and is_train,
         )
-
         dataset.load_data(wiki_data=self.wiki_data, tensorizer=self.tensorizer)
 
         if iterator_class == "ShardedDataIterator":
@@ -155,8 +152,10 @@ class ReaderTrainer(object):
             if offset > 0:
                 updates_per_epoch = iterator.max_iterations // \
                     self.cfg.train.gradient_accumulation_steps
-                global_step = self.start_epoch * updates_per_epoch + self.start_batch
-                iterator.set_offset(global_step)  # offset of this iterator is global step
+                global_step = (
+                    self.start_epoch * updates_per_epoch + self.start_batch)
+                # Offset of this iterator is global step
+                iterator.set_offset(global_step)
         else:
             raise NotImplementedError
 
@@ -177,9 +176,12 @@ class ReaderTrainer(object):
             offset=self.start_batch,
         )
 
-        logger.info("Total iterations per epoch=%d", train_iterator.max_iterations)
+        logger.info(
+            f"Total iterations per epoch={train_iterator.max_iterations}"
+        )
         updates_per_epoch = (
-            train_iterator.max_iterations // cfg.train.gradient_accumulation_steps
+            train_iterator.max_iterations //
+            cfg.train.gradient_accumulation_steps
         )
 
         total_updates = updates_per_epoch * cfg.train.num_train_epochs
@@ -197,7 +199,8 @@ class ReaderTrainer(object):
                 total_updates,
             )
         else:
-            scheduler = get_schedule_linear(self.optimizer, warmup_steps, total_updates)
+            scheduler = get_schedule_linear(
+                self.optimizer, warmup_steps, total_updates)
 
         # Eval before any training, but no checkpointing
         if self.model_file is not None and self.cfg.eval_first:
@@ -220,12 +223,19 @@ class ReaderTrainer(object):
 
         if cfg.local_rank in [-1, 0]:
             logger.info(
-                "Training finished. Best validation checkpoint %s", self.best_cp_name
+                f"Training finished. Best validation checkpoint "
+                f"{self.best_cp_name}",
             )
 
         return
 
-    def validate_and_save(self, epoch: int, iteration: int, scheduler, save_cp: bool = False):
+    def validate_and_save(
+        self,
+        epoch: int,
+        iteration: int,
+        scheduler,
+        save_cp: bool = False,
+    ):
         cfg = self.cfg
         # in distributed DDP mode, save checkpoint for only one process
         save_cp = save_cp and cfg.local_rank in [-1, 0]
@@ -238,8 +248,10 @@ class ReaderTrainer(object):
             if reader_validation_score > (self.best_validation_result or 0):
                 self.best_validation_result = reader_validation_score
                 self.best_cp_name = cp_name
-                logger.info(f"New Best validation checkpoint {cp_name} with validation score "
-                            f"{reader_validation_score:.2f}")
+                logger.info(
+                    f"New Best validation checkpoint {cp_name} with validation "
+                    f"score {reader_validation_score:.2f}"
+                )
 
     def validate(self):
         logger.info("Validation ...")
@@ -254,7 +266,7 @@ class ReaderTrainer(object):
                 shuffle=False,
             )
 
-        log_result_step = cfg.train.log_batch_step // 4  # validation needs to be more verbose
+        log_result_step = max(cfg.train.log_batch_step // 4, 1)
         all_results = []
 
         eval_top_docs = cfg.eval_top_docs
@@ -292,6 +304,13 @@ class ReaderTrainer(object):
 
             if (i + 1) % log_result_step == 0:
                 logger.info("Eval step: %d ", i)
+
+            if self.debugging and i == 5:
+                logger.info(
+                    "Reached 5 iterations when debugging mode is on. "
+                    "Early stopping..."
+                )
+                break
 
         ems = defaultdict(list)
         f1s = defaultdict(list)
@@ -382,7 +401,6 @@ class ReaderTrainer(object):
             )
 
             loss = self._calc_loss(input)
-
             epoch_loss += loss.item()
             rolling_train_loss += loss.item()
 
@@ -422,11 +440,10 @@ class ReaderTrainer(object):
 
             if (i + 1) % rolling_loss_step == 0:
                 logger.info("Train batch %d", data_iteration)
-                latest_rolling_train_av_loss = rolling_train_loss / rolling_loss_step
                 logger.info(
                     "Avg. loss per last %d batches: %f",
                     rolling_loss_step,
-                    latest_rolling_train_av_loss,
+                    rolling_train_loss / rolling_loss_step,
                 )
                 rolling_train_loss = 0.0
 
@@ -448,6 +465,13 @@ class ReaderTrainer(object):
                     epoch, train_data_iterator.get_iteration(), scheduler
                 )
                 self.reader.train()
+
+            if self.debugging and i == 5:
+                logger.info(
+                    "Reached 5 iterations when debugging mode is on. "
+                    "Early stopping..."
+                )
+                break
 
         epoch_loss = (epoch_loss / epoch_batches) if epoch_batches > 0 else 0
         logger.info("Av Loss per epoch=%f", epoch_loss)
@@ -490,7 +514,9 @@ class ReaderTrainer(object):
             offset = saved_state.offset
             if offset == 0:  # epoch has been completed
                 epoch += 1
-            logger.info("Loading checkpoint @ batch=%s and epoch=%s", offset, epoch)
+            logger.info(
+                f"Loading checkpoint @ batch={offset} and epoch={epoch}"
+            )
             self.start_epoch = epoch
             self.start_batch = offset
 
@@ -506,39 +532,15 @@ class ReaderTrainer(object):
         cfg = self.cfg
         input = ReaderBatch(**move_to_device(input._asdict(), cfg.device))
         attn_mask = self.tensorizer.get_attn_mask(input.input_ids)
-        questions_num, passages_per_question, _ = input.input_ids.size()
 
-        if self.reader.training:
-            # start_logits, end_logits, rank_logits = self.reader(input.input_ids, attn_mask)
-            loss = self.reader(
-                input.input_ids,
-                attn_mask,
-                input.start_positions,
-                input.end_positions,
-                input.answers_mask,
-                use_simple_loss=getattr(cfg.train, "use_simple_loss", False),
-                average_loss=getattr(cfg.train, "average_loss", False),
-            )
+        loss = self.reader(
+            input.input_ids,
+            attn_mask,
+            input.start_positions,
+            input.end_positions,
+            input.answers_mask,
+        )
 
-        else:
-            # TODO: remove?
-            with torch.no_grad():
-                start_logits, end_logits, rank_logits = self.reader(
-                    input.input_ids, attn_mask
-                )
-
-            loss = compute_loss(
-                input.start_positions,
-                input.end_positions,
-                input.answers_mask,
-                start_logits,
-                end_logits,
-                rank_logits,
-                questions_num,
-                passages_per_question,
-                use_simple_loss=getattr(cfg.train, "use_simple_loss", False),
-                average=getattr(cfg.train, "average_loss", False),
-            )
         if cfg.n_gpu > 1:
             loss = loss.mean()
         if cfg.train.gradient_accumulation_steps > 1:
@@ -563,7 +565,8 @@ class ReaderTrainer(object):
                                 "prediction": {
                                     "text": span_pred.prediction_text,
                                     "score": span_pred.span_score,
-                                    "relevance_score": span_pred.relevance_score,
+                                    "relevance_score": \
+                                        span_pred.relevance_score,
                                     "passage_idx": span_pred.passage_index,
                                     "passage": self.tensorizer.to_string(
                                         span_pred.passage_token_ids
@@ -585,7 +588,8 @@ def main(cfg: DictConfig):
 
     cfg = setup_cfg_gpu(cfg)
     set_seed(cfg)
-    get_gpu_info(rank=cfg.local_rank)  # for now only work with single-GPU and DDP mode
+    # For now only work with single-GPU and DDP mode
+    get_gpu_info(rank=cfg.local_rank)
 
     if cfg.local_rank in [-1, 0]:
         logger.info("CFG (after gpu  configuration):")
@@ -604,7 +608,8 @@ def main(cfg: DictConfig):
         trainer.validate()
     else:
         logger.warning(
-            "Neither train_file or (model_file & dev_file) parameters are specified. Nothing to do."
+            "Neither train_file or (model_file & dev_file) parameters are "
+            "specified. Nothing to do."
         )
 
 

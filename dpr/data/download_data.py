@@ -6,17 +6,18 @@
 # LICENSE file in the root directory of this source tree.
 
 """
- Command line tool to download various preprocessed data sources & checkpoints for DPR
+Command line tool to download various preprocessed data sources & checkpoints
+for DPR
 """
 
-import argparse
+import os
+import wget
 import gzip
 import logging
-import os
 import pathlib
-import wget
-
+import argparse
 from typing import Tuple
+
 
 logger = logging.getLogger(__name__)
 
@@ -385,16 +386,22 @@ def unpack(gzip_file: str, out_file: str):
 
 
 def download_resource(
-    s3_url: str, original_ext: str, compressed: bool, resource_key: str, out_dir: str
+    s3_url: str,
+    original_ext: str,
+    compressed: bool,
+    resource_key: str,
+    out_dir: str,
 ) -> Tuple[str, str]:
+
     logger.info("Requested resource from %s", s3_url)
     path_names = resource_key.split(".")
 
     if out_dir:
         root_dir = out_dir
     else:
-        # since hydra overrides the location for the 'current dir' for every run and we don't want to duplicate
-        # resources multiple times, remove the current folder's volatile part
+        # Since hydra overrides the location for the 'current dir' for every
+        # run and we don't want to duplicate resources multiple times, remove
+        # the current folder's volatile part
         root_dir = os.path.abspath("./")
         if "/outputs/" in root_dir:
             root_dir = root_dir[: root_dir.index("/outputs/")]
@@ -427,7 +434,8 @@ def download_resource(
     logger.info("Downloaded to %s", local_file)
 
     if compressed:
-        uncompressed_file = os.path.join(save_root, path_names[-1] + original_ext)
+        uncompressed_file = os.path.join(
+            save_root, path_names[-1] + original_ext)
         unpack(local_file, uncompressed_file)
         os.remove(local_file)
         local_file = uncompressed_file
@@ -449,7 +457,9 @@ def download_file(s3_url: str, out_dir: str, file_name: str):
 def download(resource_key: str, out_dir: str = None):
     if resource_key not in RESOURCES_MAP:
         # match by prefix
-        resources = [k for k in RESOURCES_MAP.keys() if k.startswith(resource_key)]
+        resources = [
+            k for k in RESOURCES_MAP.keys() if k.startswith(resource_key)
+        ]
         if resources:
             for key in resources:
                 download(key, out_dir)

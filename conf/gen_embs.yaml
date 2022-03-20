@@ -1,4 +1,5 @@
 defaults:
+  - _self_
   - encoder: hf_bert
   - ctx_sources: default_sources
 
@@ -26,17 +27,6 @@ num_shards: 1
 
 # Batch size for the passage encoder forward pass (works in DataParallel mode)
 batch_size: 1536
-
-tables_as_passages: False
-
-# tokens which won't be slit by tokenizer
-special_tokens:
-
-tables_chunk_sz: 100
-
-# TODO
-tables_split_type: type1
-
 
 # TODO: move to a conf group
 # local_rank for distributed training on gpus

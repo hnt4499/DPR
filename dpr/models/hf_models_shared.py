@@ -13,14 +13,18 @@ encoding both question and context
 import logging
 from typing import Dict, List
 
+import numpy as np
 import torch
 from torch import Tensor as T
-import numpy as np
 from transformers.models.bert import BertTokenizer
 
 from dpr.models.biencoder_retrievers.biencoder import BiEncoder
-from dpr.models.hf_models import _add_special_tokens, get_optimizer, HFBertEncoder
-from dpr.models.hf_models import BertTensorizer as Tensorizer
+from dpr.models.hf_models import (
+    get_optimizer,
+    HFBertEncoder,
+    BertTensorizer as Tensorizer,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -35,19 +39,13 @@ def get_bert_biencoder_components(cfg, inference_only: bool = False, **kwargs):
         **kwargs
     )
 
-    fix_ctx_encoder = cfg.fix_ctx_encoder if hasattr(cfg, "fix_ctx_encoder") else False
-
-    biencoder = BiEncoder(
-        question_encoder, ctx_encoder, fix_ctx_encoder=fix_ctx_encoder
-    ).to(cfg.device)
-
+    biencoder = BiEncoder(question_encoder, ctx_encoder).to(cfg.device)
     optimizer = (
         get_optimizer(
             biencoder,
             learning_rate=cfg.train.learning_rate,
             adam_eps=cfg.train.adam_eps,
             weight_decay=cfg.train.weight_decay,
-            use_lamb=cfg.train.lamb,
         )
         if not inference_only
         else None
@@ -62,16 +60,23 @@ def get_bert_tensorizer(cfg, biencoder):
     pretrained_model_cfg = cfg.encoder.pretrained_model_cfg
 
     tokenizer = get_bert_tokenizer(
-        pretrained_model_cfg, biencoder=biencoder, do_lower_case=cfg.do_lower_case
+        pretrained_model_cfg,
+        biencoder=biencoder,
+        do_lower_case=cfg.do_lower_case,
     )
-    if cfg.special_tokens:
-        _add_special_tokens(tokenizer, cfg.special_tokens)
 
     return BertTensorizer(tokenizer, sequence_length)
 
 
-def get_bert_tokenizer(pretrained_cfg_name: str, biencoder: BiEncoder, do_lower_case: bool = True):
-    """If needed, this tokenizer will be added one special token [QST] representing the question token"""
+def get_bert_tokenizer(
+    pretrained_cfg_name: str,
+    biencoder: BiEncoder,
+    do_lower_case: bool = True,
+):
+    """
+    Add one special token [QST] representing the question token to the
+    tokenizer.
+    """
     tokenizer = BertTokenizer.from_pretrained(
         pretrained_cfg_name, do_lower_case=do_lower_case
     )
@@ -81,11 +86,18 @@ def get_bert_tokenizer(pretrained_cfg_name: str, biencoder: BiEncoder, do_lower_
     tokenizer.add_special_tokens({"additional_special_tokens": ["[QST]"]})
 
     with torch.no_grad():
-        encoder_embeddings = biencoder.question_model.resize_token_embeddings(len(tokenizer))
-        encoder_embeddings.weight[-1, :] = encoder_embeddings.weight[tokenizer.cls_token_id, :].detach().clone()  # intialize with [CLS] embedding
-    assert biencoder.ctx_model.resize_token_embeddings().weight.shape[0] == encoder_embeddings.weight.shape[0], \
+        encoder_embeddings = biencoder.question_model.resize_token_embeddings(
+            len(tokenizer))
+        # Initialize with [CLS] embedding
+        cls_embs = encoder_embeddings.weight[tokenizer.cls_token_id, :]
+        encoder_embeddings.weight[-1, :] = cls_embs.detach().clone()
+    assert biencoder.ctx_model.resize_token_embeddings().weight.shape[0] \
+        == encoder_embeddings.weight.shape[0], \
         "Context and question encoders are not the same!"
-    logger.info(f"Added [QST] token: before: {tuple(before)}, after: {tuple(encoder_embeddings.weight.shape)}")
+    logger.info(
+        f"Added [QST] token: before: {tuple(before)}, after: "
+        f"{tuple(encoder_embeddings.weight.shape)}"
+    )
 
     return tokenizer
 
@@ -99,7 +111,8 @@ class BertTensorizer(Tensorizer):
         apply_max_len: bool = True,
     ):
         text = text.strip()
-        # tokenizer automatic padding is explicitly disabled since its inconsistent behavior
+        # Tokenizer automatic padding is explicitly disabled since its
+        # inconsistent behavior
         # TODO: move max len to methods params?
 
         if title:  # title + passage
@@ -123,7 +136,10 @@ class BertTensorizer(Tensorizer):
             assert token_ids[0] == self.tokenizer.cls_token_id
             token_ids[0] = self.tokenizer.convert_tokens_to_ids("[QST]")
 
-        token_ids = self.to_max_length(np.array(token_ids), apply_max_len=apply_max_len)
+        token_ids = self.to_max_length(
+            np.array(token_ids),
+            apply_max_len=apply_max_len,
+        )
 
         return torch.from_numpy(token_ids)
 
@@ -131,14 +147,20 @@ class BertTensorizer(Tensorizer):
         self,
         ids: Dict[str, List[int]],
         get_passage_offset: bool = False,
-        to_max_length: bool = False,  # for backward compatibility, this is set to False by default
+        to_max_length: bool = False,  # False by default for backward compat.
     ) -> T:
         """
-        Simply concatenate inputs by adding [CLS] at the beginning and [SEP] at between and end.
+        Simply concatenate inputs by adding [CLS] at the beginning and [SEP] at
+        between and end.
         """
-        # 3 mode: only question, only passage ("passage_title" + "passage") or all
+        # 3 mode: only question, only passage ("passage_title" + "passage") or
+        # all
         current_mode = set(ids.keys())
-        allowed_modes = [{"question"}, {"passage_title", "passage"}, {"question", "passage_title", "passage"}]
+        allowed_modes = [
+            {"question"},
+            {"passage_title", "passage"},
+            {"question", "passage_title", "passage"},
+        ]
         if current_mode not in allowed_modes:
             raise ValueError(f"Unexpected keys: {list(ids.keys())}")
 
@@ -174,7 +196,8 @@ class BertTensorizer(Tensorizer):
                 [sep_token],
             ])
             if get_passage_offset:
-                passage_offset = 3 + len(ids["question"]) + len(ids["passage_title"])
+                passage_offset = 3 + len(ids["question"]) + \
+                    len(ids["passage_title"])
 
         if to_max_length:
             token_ids = self.to_max_length(token_ids, apply_max_len=True)

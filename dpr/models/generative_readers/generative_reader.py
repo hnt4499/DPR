@@ -11,11 +11,11 @@ import logging
 import random
 from typing import List, Tuple, Union
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch import Tensor as T
 from torch.utils.checkpoint import checkpoint
-import numpy as np
 
 from transformers.models.t5.modeling_t5 import (
     T5ForConditionalGeneration,
@@ -28,12 +28,14 @@ from transformers.models.t5.modeling_t5 import (
     T5LayerSelfAttention,
     T5LayerCrossAttention,
 )
-from transformers.modeling_outputs import BaseModelOutputWithPastAndCrossAttentions
+from transformers.modeling_outputs import (
+    BaseModelOutputWithPastAndCrossAttentions,
+)
 from transformers import T5Tokenizer
 
-from ...utils.model_utils import load_state_dict_to_model
-from ...data.general_data import TokenizedWikipediaPassages
-from ...data.data_types import (
+from dpr.utils.model_utils import load_state_dict_to_model
+from dpr.data.general_data_preprocess import TokenizedWikipediaPassages
+from dpr.data.data_types import (
     GenerativeReaderPassage,
     GenerativeReaderSample,
     GenerativeReaderBatch,
@@ -142,10 +144,10 @@ class CustomT5Stack(T5Stack):
         else:
             self.block = block
 
-        self.final_layer_norm = T5LayerNorm(  # we don't need to share this layer
+        self.final_layer_norm = T5LayerNorm(
             config.d_model,
             eps=config.layer_norm_epsilon,
-        )
+        )  # we don't need to share this layer
         self.dropout = nn.Dropout(config.dropout_rate)
 
         self.init_weights()
@@ -163,7 +165,9 @@ class FiDT5(T5ForConditionalGeneration):
         gradient_checkpointing: bool = True,
         share_encoder_decoder: bool = False,
     ):
-        super(T5ForConditionalGeneration, self).__init__(config)  # note the call stack
+        # Note the call stack
+        super(T5ForConditionalGeneration, self).__init__(config)
+
         self.model_dim = config.d_model
         self.num_passages = num_passages
         self._device = device
@@ -197,8 +201,8 @@ class FiDT5(T5ForConditionalGeneration):
 
         else:
             logger.info(
-                f"[{self.__class__.__name__}] Weights of the encoder and decoder "
-                f"are not shared!"
+                f"[{self.__class__.__name__}] Weights of the encoder and "
+                f"decoder are not shared!"
             )
             block = None
 
@@ -307,8 +311,8 @@ class FiDT5(T5ForConditionalGeneration):
         We need to resize the input ids and attention mask as (B, N * L) instead
         of (B * N, L) here because the T5 forward method uses the input tensors'
         shape to infer dimensions used in the decoder.
-        Note that in EncoderWrapper, the input ids and attention mask are re-resized
-        as (B * N, L).
+        Note that in EncoderWrapper, the input ids and attention mask are
+        re-resized as (B * N, L).
         """
         if input_ids is not None and input_ids.ndim == 3:
             assert input_ids.shape[1] == self.num_passages
@@ -326,8 +330,9 @@ class FiDT5(T5ForConditionalGeneration):
         # gotten turned into a plain python dictionary.
         if (not self.training) and isinstance(kwargs["encoder_outputs"], dict) \
                 and "encoder_outputs" in kwargs:
-            kwargs["encoder_outputs"] = BaseModelOutputWithPastAndCrossAttentions(
-                **kwargs["encoder_outputs"])
+            kwargs["encoder_outputs"] = \
+                BaseModelOutputWithPastAndCrossAttentions(
+                    **kwargs["encoder_outputs"])
 
         outputs = super(FiDT5, self).forward(
             input_ids=input_ids,
@@ -347,9 +352,11 @@ class FiDT5(T5ForConditionalGeneration):
 
     def generate(self, input_ids: T, attention_mask: T, max_length: int):
         assert input_ids.ndim == 3 and input_ids.shape[1] == self.num_passages
-        assert attention_mask.ndim == 3 and attention_mask.shape[1] == self.num_passages
+        assert attention_mask.ndim == 3 and attention_mask.shape[1] \
+            == self.num_passages
 
-        # We need to resize the inputs here, as the generate method expect 2D tensors
+        # We need to resize the inputs here, as the generate method expect 2D
+        # tensors
         return super(FiDT5, self).generate(
             input_ids=input_ids.view(input_ids.size(0), -1),
             attention_mask=attention_mask.view(attention_mask.size(0), -1),
@@ -402,10 +409,12 @@ class FiDT5Encoder(nn.Module):
 
     def forward(self, input_ids: T, attention_mask: T, **kwargs):
         """
-        Forward pass logic, which takes care of processing input passages independently.
-        Because of the forward pass of `FiDT5`, the inputs was resized to (B, N * L)
-        (to comply with T5). We hence need to reshape it the other way round
-        (i.e., (B * N, L)), so that each passage is processed independently.
+        Forward pass logic, which takes care of processing input passages
+        independently.
+        Because of the forward pass of `FiDT5`, the inputs was resized to
+        (B, N * L) (to comply with T5). We hence need to reshape it the other
+        way round (i.e., (B * N, L)), so that each passage is processed
+        independently.
         """
         # Sanity check
         batch_size, total_length = input_ids.shape
@@ -426,7 +435,12 @@ class FiDT5Encoder(nn.Module):
         return outputs
 
 
-def _flatten(inputs, flattened_inputs: list, structure: list, only_tensor: bool):
+def _flatten(
+    inputs,
+    flattened_inputs: list,
+    structure: list,
+    only_tensor: bool,
+):
     """
     Helper for the `flatten` function.
     """
@@ -436,7 +450,8 @@ def _flatten(inputs, flattened_inputs: list, structure: list, only_tensor: bool)
             _flatten(input, flattened_inputs, sub_structure, only_tensor)
         structure.append(tuple(sub_structure))
 
-    elif (only_tensor and (inputs is None or isinstance(inputs, T))) or (not only_tensor):
+    elif (only_tensor and (inputs is None or isinstance(inputs, T))) \
+            or (not only_tensor):
         flattened_inputs.append(inputs)
         structure.append(-1)
 
@@ -453,19 +468,19 @@ def flatten(inputs, only_tensor: bool):
     Parameters
     ----------
     inputs
-        Input to flatten. Recursively speaking, sub-object of this
-        `inputs` (including `inputs` itself) should be either a None,
-        a tensor or a tuple/list of these types. See `only_tensor`.
+        Input to flatten. Recursively speaking, sub-object of this `inputs`
+        (including `inputs` itself) should be either a None, a tensor or a
+        tuple/list of these types. See `only_tensor`.
     only_tensor : bool
-        If True, recursively check if every "leaf" object is either None
-        or a torch tensor. Raise an error if an object of another type
-        is found. This is useful for checking for outputs of `forward`
+        If True, recursively check if every "leaf" object is either None or a
+        torch tensor. Raise an error if an object of another type is found.
+        This is useful for checking for outputs of `forward`
         functions.
 
     Returns
     -------
-        A tuple of (flattened_inputs, structure), where the `structure`
-        object could be used to recover the original structured inputs.
+        A tuple of (flattened_inputs, structure), where the `structure` object
+        could be used to recover the original structured inputs.
     """
     flattened_inputs = []
     structure = []
@@ -504,20 +519,21 @@ def convert_kwargs_to_args(func, args, kwargs, exclude_self: bool):
     """
     Inspect the input function `func` and convert positional arguments
     (`args`) and keyword arguments (`kwargs`) to a tuple of positional arguments
-    (only `args`), while filling missing keyword arguments with their default values.
+    (only `args`), while filling missing keyword arguments with their default
+    values.
 
     Example:
     >>> def f(x, y=None, z=1, t=False):
     >>>     pass
-    >>> convert_kwargs_to_args(f)  # raise TypeError, since `x` is a required argument
+    >>> convert_kwargs_to_args(f)  # raise TypeError, since `x` is required
     >>> convert_kwargs_to_args(f, 1)  # (1, None, 1, False)
     >>> convert_kwargs_to_args(f, 1, t=True, y=[1, 2, 3])  # (1, [1, 2, 3], 1, True)
 
     Parameters
     ----------
     exclude_self : bool
-        Whether to exclude `self` from the list of arguments. Useful for methods (not
-        functions).
+        Whether to exclude `self` from the list of arguments. Useful for methods
+        (not functions).
     """
     # Get function specs
     func_spec = inspect.getfullargspec(func)
@@ -536,7 +552,8 @@ def convert_kwargs_to_args(func, args, kwargs, exclude_self: bool):
 
         if len(args_missing) > 0:
             raise TypeError(
-                f"Missing {num_missing} required positional argument: {args_missing}"
+                f"Missing {num_missing} required positional argument: "
+                f"{args_missing}"
             )
 
     # Process args and kwargs, merge them into args
@@ -548,8 +565,8 @@ def convert_kwargs_to_args(func, args, kwargs, exclude_self: bool):
         value = kwargs.pop(arg_name)
         all_args.append(value)
 
-    # Collect all keyword arguments in sequential order, filling missing values with default
-    # values
+    # Collect all keyword arguments in sequential order, filling missing values
+    # with default values
     num_remain_args = len(func_args) - len(all_args)
     remain_args = func_args[-num_remain_args:]
     remain_defaults = func_defaults[-num_remain_args:]
@@ -567,10 +584,10 @@ def convert_kwargs_to_args(func, args, kwargs, exclude_self: bool):
 
 def is_tensor(object):
     """
-    Recursively check whether the input object is a tensor or a tuple / list of tensor.
-    Note that if one of the (sub-)objects is a tuple / list containing some tensors and
-    some non-tensors, this function will return False, considering that object as a
-    non-tensor object.
+    Recursively check whether the input object is a tensor or a tuple / list of
+    tensor. Note that if one of the (sub-)objects is a tuple / list containing
+    some tensors and some non-tensors, this function will return False,
+    considering that object as a non-tensor object.
     """
     if isinstance(object, T):
         return True
@@ -590,10 +607,11 @@ def wrap_function(func, args, exclude_self: bool, _func=None):
     Parameters
     ----------
     args : tuple
-        Tuple of processed positional arguments returned by `convert_kwargs_to_args`.
+        Tuple of processed positional arguments returned by
+        `convert_kwargs_to_args`.
     exclude_self : bool
-        Whether to exclude `self` from the list of arguments. Useful for methods (not
-        functions).
+        Whether to exclude `self` from the list of arguments. Useful for
+        methods (not functions).
     _func
         Function to be wrapped over. Normal usage is that: `func` is the forward
         function and `_func` is the `__call__` function. If not provided, use
@@ -601,23 +619,23 @@ def wrap_function(func, args, exclude_self: bool, _func=None):
 
     Returns
     -------
-    A tuple of (wrapped function, args), where args contains only tensor objects.
-    Calling `func(args)` would return the desired results.
+    A tuple of (wrapped function, args), where args contains only tensor
+    objects. Calling `func(args)` would return the desired results.
     """
     # Get function specs
     func_spec = inspect.getfullargspec(func)
     func_args = func_spec.args[1:] if exclude_self else func_spec.args
     if len(func_args) != len(args):
         raise ValueError(
-            f"Arguments mismatch. Got {len(args)} arguments, while the function "
-            f"requires {len(func_args)} arguments. Make sure to check "
+            f"Arguments mismatch. Got {len(args)} arguments, while the "
+            f"function requires {len(func_args)} arguments. Make sure to check "
             f"`exclude_self` option and that `args` is processed using the "
             f"`convert_kwargs_to_args` function."
         )
 
     # Process args and kwargs
     processed_arg_values = []  # tensor container
-    processed_arg_names = []  # contains argument name of corresponding `processed_args`
+    processed_arg_names = []  # contains argument name of `processed_args`
     processed_kwargs = {}
 
     for arg_value, arg_name in zip(args, func_args):
@@ -673,12 +691,15 @@ class CheckpointWrapper(nn.Module):
                 self.module.forward,
                 args=args,
                 exclude_self=True,
-                _func=self.module.__call__,  # wrap over this function instead of `forward`
+                # Wrap over this function instead of `forward`
+                _func=self.module.__call__,
             )
 
-            # Flatten the arguments so that all Tensors are present at the root level
+            # Flatten the arguments so that all Tensors are present at the root
+            # level
             args, input_structure = flatten(args, only_tensor=False)
-            output_structure = []  # workaround to get output structure from inside `custom_forward`
+            # Workaround to get output structure from within `custom_forward`
+            output_structure = []
 
             def get_empty_tensor():
                 """Helper function to get empty tensor with gradients"""
@@ -710,7 +731,7 @@ class CheckpointWrapper(nn.Module):
 
             output: List[T] = checkpoint(
                 custom_forward,
-                get_empty_tensor(),  # need at least one tensor that requires grad
+                get_empty_tensor(),  # need at least one tensor requiring grad
                 *args,
             )
 
@@ -873,7 +894,10 @@ class FiDTensorizer:
             max_length=self.answer_max_length,
             add_special_tokens=True,
         )
-        answer_ids = self.to_max_length(answer_ids, max_length=self.answer_max_length)
+        answer_ids = self.to_max_length(
+            answer_ids,
+            max_length=self.answer_max_length,
+        )
         return answer_ids
 
     def concatenate_answer_ids(self, answer_ids: Union[np.ndarray, T]) -> T:
@@ -885,7 +909,10 @@ class FiDTensorizer:
             answer_ids,
             self.eos_token_id_tensor,
         ])
-        answer_ids = self.to_max_length(answer_ids, max_length=self.answer_max_length)
+        answer_ids = self.to_max_length(
+            answer_ids,
+            max_length=self.answer_max_length,
+        )
         return answer_ids
 
     def encode_question_and_passage_pair(
@@ -897,13 +924,18 @@ class FiDTensorizer:
         """
         Encode a question-passage_title-passage pair into token ids.
         """
-        concat_str = f"question: {question}, title: {passage_title}, context: {passage}"
+        concat_str = (
+            f"question: {question}, title: {passage_title}, context: {passage}"
+        )
         concat_ids = self.encode(
             concat_str,
             max_length=self.context_max_length,
             add_special_tokens=True,
         )
-        concat_ids = self.to_max_length(concat_ids, max_length=self.context_max_length)
+        concat_ids = self.to_max_length(
+            concat_ids,
+            max_length=self.context_max_length,
+        )
         return concat_ids
 
     def concatenate_question_and_passage_ids_pair(
@@ -913,22 +945,26 @@ class FiDTensorizer:
         passage: Union[np.ndarray, T],
     ) -> T:
         """
-        Concatenate a question-passage_title-passage ids pair with appropriate special
-        tokens/prompts.
+        Concatenate a question-passage_title-passage ids pair with appropriate
+        special tokens/prompts.
         """
         question, passage_title, passage = self.to_tensor(
             question, passage_title, passage
         )
+        kwargs = dict(padding=False, truncation=False, add_special_tokens=False)
         concat_ids = torch.cat([
-            self.encode("question: ", padding=False, truncation=False, add_special_tokens=False),
+            self.encode("question: ", **kwargs),
             question,
-            self.encode("title: ", padding=False, truncation=False, add_special_tokens=False),
+            self.encode("title: ", **kwargs),
             passage_title,
-            self.encode("context: ", padding=False, truncation=False, add_special_tokens=False),
+            self.encode("context: ", **kwargs),
             passage,
             self.eos_token_id_tensor,
         ])
-        concat_ids = self.to_max_length(concat_ids, max_length=self.context_max_length)
+        concat_ids = self.to_max_length(
+            concat_ids,
+            max_length=self.context_max_length,
+        )
         return concat_ids
 
     def get_attn_mask(self, tokens_tensor: T) -> T:
@@ -967,17 +1003,18 @@ def create_generative_reader_input(
     shuffle: bool,
 ) -> GenerativeReaderBatch:
     """
-    Creates a reader batch instance out of a list of ReaderSample-s. This is compatible with `GeneralDataset`.
+    Creates a reader batch instance out of a list of ReaderSample-s. This is
+    compatible with `GeneralDataset`.
     :param wiki_data: all tokenized wikipedia passages
     :param tensorizer: initialized tensorizer (which contains the tokenizer)
     :param samples: list of samples to create the batch for
-    :param passages_per_question: amount of passages for every question in a batch
+    :param passages_per_question: amount of passages for every question in a
+        batch
     :param max_length: max model input sequence length
     :param is_train: if the samples are for a train set
     :param shuffle: should passages selection be randomized
     :return: ReaderBatch instance
     """
-    context_IDs = []
     input_ids = []
     answer_ids = []
 
@@ -1005,7 +1042,7 @@ def create_generative_reader_input(
             # use top-k retrieved samples
             ctxs = sorted(ctxs, key=lambda x: x.score, reverse=True)
 
-        sample_tensors = _create_question_passages_tensors(
+        sample_input_ids = _create_question_passages_tensors(
             wiki_data,
             question_token_ids,
             tensorizer,
@@ -1013,19 +1050,15 @@ def create_generative_reader_input(
             passages_per_question,
             empty_sequence,
         )
-        context_ID, sample_input_ids = sample_tensors
 
-        context_IDs.append(context_ID)
         input_ids.append(sample_input_ids)
         answer_ids.append(sample_answer_ids)
 
-    context_IDs = torch.stack(context_IDs, dim=0)  # (N, M)
     input_ids = torch.stack(input_ids, dim=0)  # (N, M)
     if is_train:
         answer_ids = torch.stack(answer_ids, dim=0)  # (N, M_short)
 
-    assert len(context_IDs) == len(input_ids) == len(answer_ids)
-    return GenerativeReaderBatch(context_IDs, input_ids, answer_ids)
+    return GenerativeReaderBatch(input_ids, answer_ids)
 
 
 def _create_question_passages_tensors(
@@ -1036,9 +1069,7 @@ def _create_question_passages_tensors(
     total_size: int,
     empty_ids: T,
 ):
-    context_IDs: List[int] = []
     context_selected = []
-
     for context in ctxs[:total_size]:
 
         if getattr(context, "sequence_ids", None) is None:
@@ -1054,16 +1085,10 @@ def _create_question_passages_tensors(
                 passage=context.passage_token_ids,
             )
             context.sequence_ids = sequence_ids
-
-        context_IDs.append(context.id)
         context_selected.append(context.sequence_ids)
 
     while len(context_selected) < total_size:
-        context_IDs.append(-1)
         context_selected.append(empty_ids.clone())
 
-    context_IDs = torch.tensor(context_IDs, dtype=torch.int64)
     input_ids = torch.stack(context_selected, dim=0)
-    assert len(context_IDs) == len(input_ids)
-
-    return context_IDs, input_ids
+    return input_ids

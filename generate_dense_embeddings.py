@@ -6,8 +6,9 @@
 # LICENSE file in the root directory of this source tree.
 
 """
- Command line tool that produces embeddings for a large documents base based on the pretrained ctx & question encoders
- Supposed to be used in a 'sharded' way to speed up the process.
+Command line tool that produces embeddings for a large documents base based on
+the pretrained ctx & question encoders
+Supposed to be used in a 'sharded' way to speed up the process.
 """
 import logging
 import math
@@ -31,7 +32,6 @@ from dpr.utils.model_utils import (
     setup_for_distributed_mode,
     get_model_obj,
     load_states_from_checkpoint,
-    move_to_device,
 )
 
 logger = logging.getLogger()
@@ -49,7 +49,7 @@ def gen_ctx_vectors(
     bsz = cfg.batch_size
     total = 0
     results = []
-    for j, batch_start in enumerate(range(0, n, bsz)):
+    for batch_start in range(0, n, bsz):
         batch = ctx_rows[batch_start : batch_start + bsz]
         batch_token_tensors = [
             tensorizer.text_to_tensor(
@@ -58,13 +58,9 @@ def gen_ctx_vectors(
             for ctx in batch
         ]
 
-        ctx_ids_batch = move_to_device(
-            torch.stack(batch_token_tensors, dim=0), cfg.device
-        )
-        ctx_seg_batch = move_to_device(torch.zeros_like(ctx_ids_batch), cfg.device)
-        ctx_attn_mask = move_to_device(
-            tensorizer.get_attn_mask(ctx_ids_batch), cfg.device
-        )
+        ctx_ids_batch = torch.stack(batch_token_tensors, dim=0).to(cfg.device)
+        ctx_seg_batch = torch.zeros_like(ctx_ids_batch).to(cfg.device)
+        ctx_attn_mask = tensorizer.get_attn_mask(ctx_ids_batch).to(cfg.device)
         with torch.no_grad():
             _, out, _ = model(ctx_ids_batch, ctx_seg_batch, ctx_attn_mask)
         out = out.cpu()
@@ -86,9 +82,10 @@ def gen_ctx_vectors(
                 ]
             )
         else:
-            results.extend(
-                [(ctx_ids[i], out[i].view(-1).numpy()) for i in range(out.size(0))]
-            )
+            results.extend([
+                (ctx_ids[i], out[i].view(-1).numpy())
+                for i in range(out.size(0))
+            ])
 
         if total % 10 == 0:
             logger.info("Encoded passages %d", total)
@@ -97,9 +94,6 @@ def gen_ctx_vectors(
 
 @hydra.main(config_path="conf", config_name="gen_embs")
 def main(cfg: DictConfig):
-
-    assert cfg.model_file, "Please specify encoder checkpoint as model_file param"
-    assert cfg.ctx_src, "Please specify passages source as ctx_src param"
 
     cfg = setup_cfg_gpu(cfg)
 
@@ -113,7 +107,8 @@ def main(cfg: DictConfig):
         cfg.encoder.encoder_model_type, cfg, inference_only=True
     )
 
-    encoder = encoder.ctx_model if cfg.encoder_type == "ctx" else encoder.question_model
+    encoder = encoder.ctx_model if cfg.encoder_type == "ctx" \
+        else encoder.question_model
 
     encoder, _ = setup_for_distributed_mode(
         encoder,
@@ -158,10 +153,8 @@ def main(cfg: DictConfig):
         end_idx = start_idx + shard_size
 
         logger.info(
-            "Producing encodings for passages range: %d to %d (out of total %d)",
-            start_idx,
-            end_idx,
-            len(all_passages),
+            f"Producing encodings for passages range: {start_idx} to {end_idx}"
+            f" (out of total {len(all_passages)})",
         )
         shard_passages = all_passages[start_idx:end_idx]
 
@@ -173,7 +166,10 @@ def main(cfg: DictConfig):
         with open(file, mode="wb") as f:
             pickle.dump(data, f)
 
-        logger.info("Total passages processed %d. Written to %s", len(data), os.path.realpath(file))
+        logger.info(
+            f"Total passages processed {len(data)}. Written to "
+            f"{os.path.realpath(file)}"
+        )
         del data  # release memory
 
 

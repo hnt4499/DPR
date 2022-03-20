@@ -5,10 +5,9 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-import collections
-import glob
+
 import logging
-import os
+import collections
 from typing import List, Tuple, Union
 
 import torch
@@ -16,7 +15,9 @@ from torch import nn
 from torch.optim.lr_scheduler import LambdaLR
 from torch.serialization import default_restore_location
 
+
 logger = logging.getLogger()
+
 
 CheckpointState = collections.namedtuple(
     "CheckpointState",
@@ -24,20 +25,6 @@ CheckpointState = collections.namedtuple(
         "model_dict",
         "optimizer_dict",
         "scheduler_dict",
-        "offset",
-        "epoch",
-        "encoder_params",
-    ],
-)
-
-CheckpointStateOFA = collections.namedtuple(
-    "CheckpointState",
-    [
-        "model_dict",
-        "biencoder_optimizer_dict",
-        "biencoder_scheduler_dict",
-        "reader_optimizer_dict",
-        "reader_scheduler_dict",
         "offset",
         "epoch",
         "encoder_params",
@@ -59,7 +46,8 @@ def setup_for_distributed_mode(
     Union[torch.optim.Optimizer, List[torch.optim.Optimizer]]
 ]:
     model.to(device)
-    if fp16 or (gradient_checkpointing and local_rank != -1):  # Gradient checkpointing AND DDP
+    # Gradient checkpointing AND DDP
+    if fp16 or (gradient_checkpointing and local_rank != -1):
         try:
             import apex
             from apex import amp
@@ -67,11 +55,13 @@ def setup_for_distributed_mode(
             apex.amp.register_half_function(torch, "einsum")
         except ImportError:
             raise ImportError(
-                "Please install apex from https://www.github.com/nvidia/apex to use fp16 training."
+                "Please install apex from https://www.github.com/nvidia/apex "
+                "to use fp16 training."
             )
 
         fp16_opt_level = fp16_opt_level if fp16 else "O0"
-        model, optimizer = amp.initialize(model, optimizer, opt_level=fp16_opt_level)
+        model, optimizer = amp.initialize(
+            model, optimizer, opt_level=fp16_opt_level)
 
     if n_gpu > 1:
         model = torch.nn.DataParallel(model)
@@ -91,25 +81,6 @@ def setup_for_distributed_mode(
             )
 
     return model, optimizer
-
-
-def move_to_cuda(sample):
-    if len(sample) == 0:
-        return {}
-
-    def _move_to_cuda(maybe_tensor):
-        if torch.is_tensor(maybe_tensor):
-            return maybe_tensor.cuda()
-        elif isinstance(maybe_tensor, dict):
-            return {key: _move_to_cuda(value) for key, value in maybe_tensor.items()}
-        elif isinstance(maybe_tensor, list):
-            return [_move_to_cuda(x) for x in maybe_tensor]
-        elif isinstance(maybe_tensor, tuple):
-            return [_move_to_cuda(x) for x in maybe_tensor]
-        else:
-            return maybe_tensor
-
-    return _move_to_cuda(sample)
 
 
 def move_to_device(sample, device):
@@ -174,39 +145,14 @@ def get_model_obj(model: nn.Module):
     return model.module if hasattr(model, "module") else model
 
 
-def get_model_file(args, file_prefix) -> str:
-    if args.model_file and os.path.exists(args.model_file):
-        return args.model_file
-
-    out_cp_files = (
-        glob.glob(os.path.join(args.output_dir, file_prefix + "*"))
-        if args.output_dir
-        else []
-    )
-    logger.info("Checkpoint files %s", out_cp_files)
-    model_file = None
-
-    if len(out_cp_files) > 0:
-        model_file = max(out_cp_files, key=os.path.getctime)
-    return model_file
-
-
 def load_states_from_checkpoint(model_file: str) -> CheckpointState:
     logger.info("Reading saved model from %s", model_file)
     state_dict = torch.load(
-        model_file, map_location=lambda s, l: default_restore_location(s, "cpu")
+        model_file,
+        map_location=lambda s, l: default_restore_location(s, "cpu")
     )
     logger.info("model_state_dict keys %s", state_dict.keys())
     return CheckpointState(**state_dict)
-
-
-def load_states_from_checkpoint_ofa(model_file: str) -> CheckpointStateOFA:
-    logger.info("Reading saved OFA model from %s", model_file)
-    state_dict = torch.load(
-        model_file, map_location=lambda s, l: default_restore_location(s, "cpu")
-    )
-    logger.info("model_state_dict keys %s", state_dict.keys())
-    return CheckpointStateOFA(**state_dict)
 
 
 def load_state_dict_to_model(
@@ -220,19 +166,25 @@ def load_state_dict_to_model(
     # Check validity
     keys_redundant = pretrained_model_keys - model_keys
     if len(keys_redundant) > 0:
-        to_log = f"Redundant keys detected in the pre-trained state dict: {list(keys_redundant)}."
+        to_log = (
+            f"Redundant keys detected in the pre-trained state dict: "
+            f"{list(keys_redundant)}."
+        )
         if strict:
             raise KeyError(to_log)
         else:
-            logger.warn()
+            logger.warn(to_log)
 
     keys_missing = model_keys - pretrained_model_keys
     if len(keys_missing) > 0:
-        to_log = f"Missing keys detected in the pretrained state dict: {list(keys_missing)}."
+        to_log = (
+            f"Missing keys detected in the pretrained state dict: "
+            f"{list(keys_missing)}."
+        )
         if strict:
             raise KeyError(to_log)
         else:
-            logger.warn()
+            logger.warn(to_log)
 
     # Remove redundant params
     for key_redundant in keys_redundant:

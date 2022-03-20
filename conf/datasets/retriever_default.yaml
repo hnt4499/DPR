@@ -1,5 +1,3 @@
-# @package _group_
-
 nq_test:
   _target_: dpr.data.retriever_data.CsvQASrc
   file: data.retriever.qas.nq-test
@@ -26,4 +24,4 @@ trivia_dev:
 
 conditional_qg:
   _target_: dpr.data.retriever_data.CsvQASrc
-  file: /opt/tiger/development/query_expansion/experiments/5_dpr_retrieval/1_convert_to_dpr_format/generated/psgs_w100_opa/dummy.txt
+  file:

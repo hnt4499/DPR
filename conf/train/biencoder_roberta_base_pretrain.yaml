@@ -1,6 +1,5 @@
-# @package _group_
-
-# Hypeparameters as specified in the RoBERTa paper
+# Hyperparameters as specified in the RoBERTa paper (Table 9 in the appendix)
+# used for pretraining
 
 batch_size:  # must be specified; should be close to 8k
 dev_batch_size:  # must be specified

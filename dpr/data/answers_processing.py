@@ -1,5 +1,6 @@
 """
-Due to inconsistency in processing steps of the original DPR package, we need some heuristics to cover more positives.
+Due to inconsistency in processing steps of the original DPR package, we need
+some heuristics to cover more positives.
 """
 
 
@@ -49,7 +50,8 @@ def remove_leading_or_trailing_space(token: str, text: str) -> List[str]:
 
 def remove_token(token: str, text: str) -> str:
     """
-    Example: "Rowan University \u200e" -> "Rowan University  " with token="\u200e"
+    Example: "Rowan University \u200e" -> "Rowan University  " with
+    token="\u200e" removed.
     """
     assert len(token) == 1
     text = text.replace(token, " ")
@@ -83,7 +85,10 @@ handling_functions = [
     partial(remove_trailing_space, token="₹"),
     partial(remove_trailing_space, token="−"),  # do not confuse this with "-"
 
-    partial(remove_leading_and_trailing_spaces, token="×"),  # do not confuse this with "x"
+    partial(
+        remove_leading_and_trailing_spaces,
+        token="×",  # do not confuse this with "x"
+    ),
 
     partial(remove_token, token="\u200e"),
     handle_double_quote,
@@ -105,7 +110,9 @@ def get_expanded_answer(text: str) -> List[str]:
         else:
             processed_texts = handling_func(text=processed_texts)
 
-    processed_texts = [t for t in processed_texts if t != text]  # remove duplicates
+    # Remove duplicates
+    processed_texts = [t for t in processed_texts if t != text]
     processed_texts = list(set(processed_texts))  # remove duplicates
-    processed_texts = [" ".join(t.split()) for t in processed_texts]  # remove leading/trailing space
+    # Remove leading/trailing space
+    processed_texts = [" ".join(t.split()) for t in processed_texts]
     return processed_texts
