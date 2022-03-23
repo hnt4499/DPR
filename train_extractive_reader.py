@@ -234,7 +234,7 @@ class ReaderTrainer(object):
         epoch: int,
         iteration: int,
         scheduler,
-        save_cp: bool = False,
+        save_cp: bool = True,
     ):
         cfg = self.cfg
         # in distributed DDP mode, save checkpoint for only one process
