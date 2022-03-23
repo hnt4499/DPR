@@ -5,7 +5,7 @@ batch_size:  # must be specified; should be close to 8k
 dev_batch_size:  # must be specified
 adam_eps: 1e-6
 adam_betas: (0.9, 0.98)
-max_grad_norm: null
+max_grad_norm: 0.0
 log_batch_step: 100
 train_rolling_loss_step: 100
 weight_decay: 0.01
